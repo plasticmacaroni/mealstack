@@ -1,0 +1,18 @@
+{
+  "name": "Mealstack",
+  "short_name": "Mealstack",
+  "description": "Find easy meals, see the real portions, and stack a week that works for you.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#2B1B4A",
+  "theme_color": "#2B1B4A",
+  "icons": [
+    {"src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    {"src": "assets/icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png"}
+  ]
+}
