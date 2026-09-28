@@ -1,5 +1,5 @@
 import {RECIPES} from './data.js';
-import {addDays,localDate,monday,slot,dayOf,typeOf,rank,makeBatch,schedule,shopping,purchaseFor,batchCost,price} from './engine.js';
+import {addDays,localDate,monday,slot,dayOf,typeOf,rank,makeBatch,schedule,shopping,purchaseFor,batchCost,price,removeBatches} from './engine.js';
 import {matchesQuery} from './discovery.js';
 
 export const menuSignature = batches => [...new Set(batches.map(b=>b.recipeId))].sort().join('|');
@@ -48,19 +48,15 @@ export function suggestPlan(state, {budget=100,maxCost=3,maxActive=20,style='sim
   const selected=['breakfast','lunch','dinner'].filter(type=>(meals??(scope==='dinners'?['dinner']:['lunch','dinner'])).includes(type));
   if(!selected.length)return {state:structuredClone(state),added:[],replaced:[],unfilled:0,repeated:false};
   const matching=matchIngredients===true;
-  const base=structuredClone(state),end=addDays(state.week,6);
-  // Preserve batches serving unchecked meals, including shared lunch/dinner batches.
+  const end=addDays(state.week,6);
+  // Preserve batches serving unchecked meals, including shared lunch/dinner batches,
+  // and suggested batches she has moved a meal of: those are her choices now.
   const existing=schedule(state),outsideSelection=new Set(Object.values(existing.cells)
-    .filter(c=>c.chosen&&!selected.includes(typeOf(c.id))).map(c=>c.chosen));
-  const replaced=base.batches.filter(b=>b.autoPlanned&&selected.includes(typeOf(b.startSlot))&&!outsideSelection.has(b.id)
-    &&dayOf(b.startSlot)>=base.week&&dayOf(b.startSlot)<=end&&rank(b.startSlot)>=earliest);
-  const replacing=new Set(replaced.map(b=>b.id));
-  base.batches=base.batches.filter(b=>!replacing.has(b.id));
-  for(const [id,bid] of Object.entries(base.pins))if(replacing.has(bid))delete base.pins[id];
-  for(const [id,bids] of Object.entries(base.skips)){base.skips[id]=bids.filter(bid=>!replacing.has(bid));if(!base.skips[id].length)delete base.skips[id];}
-  // Slots already eaten from existing batches are off limits. Track them here rather
-  // than pinning them: pins are the user's own choices, and existing food keeps its
-  // automatic placement because every new batch reserves only empty slots.
+    .filter(c=>c.chosen&&(c.manual||!selected.includes(typeOf(c.id)))).map(c=>c.chosen));
+  const replaced=state.batches.filter(b=>b.autoPlanned&&selected.includes(typeOf(b.startSlot))&&!outsideSelection.has(b.id)
+    &&dayOf(b.startSlot)>=state.week&&dayOf(b.startSlot)<=end&&rank(b.startSlot)>=earliest);
+  const base=removeBatches(state,replaced.map(b=>b.id));
+  // Slots already holding a meal are off limits: new batches only take empty slots.
   const before=schedule(base),taken=new Set(Object.values(before.cells).filter(c=>c.chosen).map(c=>c.id));
   const targets=Array.from({length:7},(_,i)=>addDays(state.week,i)).flatMap(day=>selected.map(type=>slot(day,type))).filter(id=>rank(id)>=earliest);
   const choices=RECIPES.filter(r=>(r.kind==='breakfast'?selected.includes('breakfast'):r.kind==='main'&&selected.some(t=>t!=='breakfast'))&&(state.estimates[r.id]?.active??r.active)<=maxActive
@@ -79,14 +75,14 @@ export function suggestPlan(state, {budget=100,maxCost=3,maxActive=20,style='sim
   // plan around every matching recipe. No random shortlist can hide a better base.
   for(let attempt=0;attempt<8+(matching?choices.length:0);attempt++) {
     const reuse=matching&&attempt>=8,anchor=reuse?choices[attempt-8]:null;
-    const anchorSlot=anchor?targets.find(id=>!taken.has(id)&&!base.pins[id]&&suitable(anchor,id)):null;
+    const anchorSlot=anchor?targets.find(id=>!taken.has(id)&&suitable(anchor,id)):null;
     const random=randomFor((seed+Math.imul(attempt,0x9E3779B9))>>>0),next=structuredClone(base),added=[];
     const recipeCounts=new Map(),proteinCounts=new Map(),cuisineCounts=new Map();
     const count=r=>{for(const [map,key] of [[recipeCounts,r.id],[proteinCounts,r.protein],[cuisineCounts,r.cuisine]])map.set(key,(map.get(key)||0)+1);};
     protectedBatches.forEach(b=>count(recipeMap.get(b.recipeId)));
     const priorities=new Map(choices.map(r=>[r.id,random()*6]));
     for(const target of targets) {
-      if(taken.has(target)||next.pins[target]||next.batches.length>=200)continue;
+      if(taken.has(target)||next.placements[target]||next.batches.length>=200)continue;
       const current=shopping(next),byIngredient=new Map(current.items.map(i=>[i.id,i]));
       const candidates=[];
       for(const r of choices) {
@@ -94,7 +90,7 @@ export function suggestPlan(state, {budget=100,maxCost=3,maxActive=20,style='sim
         if(!suitable(r,target)||(target===anchorSlot&&r.id!==anchor.id))continue;
         const prepAhead=['breakfast','lunch'].includes(typeOf(target));
         const useBy=addDays(dayOf(target),r.qualityDays-(prepAhead?1:0));
-        const open=targets.filter(id=>rank(id)>=rank(target)&&dayOf(id)<=useBy&&!taken.has(id)&&!next.pins[id]&&suitable(r,id)
+        const open=targets.filter(id=>rank(id)>=rank(target)&&dayOf(id)<=useBy&&!taken.has(id)&&!next.placements[id]&&suitable(r,id)
           &&(!anchorSlot||target===anchorSlot||id!==anchorSlot));
         const portions=Math.min(r.servings,open.length),scale=portions/r.servings;
         if(!portions||scale<.25)continue;
@@ -124,9 +120,9 @@ export function suggestPlan(state, {budget=100,maxCost=3,maxActive=20,style='sim
       candidates.sort((a,b)=>a.score-b.score);
       const best=candidates[0];if(!best)continue;
       const b={...makeBatch(best.r.id,target,best.scale,best.portions),useBy:best.useBy,autoPlanned:true,mealTypes:selected.filter(t=>best.r.kind==='breakfast'?t==='breakfast':t!=='breakfast'),...(best.prepAhead?{prepAhead:true}:{})};
-      next.batches.push(b);added.push(b);best.open.forEach(id=>next.pins[id]=b.id);count(best.r);
+      next.batches.push(b);added.push(b);for(const id of best.open)next.placements[id]=b.id;next.auto[b.id]=[...best.open];count(best.r);
     }
-    const unfilled=targets.filter(id=>!taken.has(id)&&!next.pins[id]).length;
+    const unfilled=targets.filter(id=>!taken.has(id)&&!next.placements[id]).length;
     const repeated=recentSignatures.has(menuSignature(added));
     const distinct=new Set(added.map(b=>b.recipeId)).size;
     const diversity=new Set(added.map(b=>recipeMap.get(b.recipeId).protein)).size+new Set(added.map(b=>recipeMap.get(b.recipeId).cuisine)).size;

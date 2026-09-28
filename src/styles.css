@@ -87,9 +87,9 @@ form label>input:not([type=checkbox]),form label>select{display:block;width:100%
 .chip{min-height:36px;padding:6px 13px;border:var(--bw) solid var(--outline);border-radius:var(--r-pill);background:var(--surface);color:var(--ink);font-size:13px;font-weight:800;white-space:nowrap}
 .chip.selected{background:var(--cheese);color:var(--candy-ink);box-shadow:var(--pop-sm)}
 @media (hover:hover){
-  :is(.primary,.secondary,.icon-button,.chip,.craving-chips button,.kind-tabs button,.segmented button,.app-header nav button,.day-jumps button,.stock-days button,.pantry-item-actions button,.empty-slot,.alternative,.batch-pill,.slot-picker button,.upcoming-batches,.pantry-open):hover:not(:disabled){transform:rotate(-1deg) translateY(-2px)}
+  :is(.primary,.secondary,.icon-button,.chip,.craving-chips button,.kind-tabs button,.segmented button,.app-header nav button,.day-jumps button,.stock-days button,.pantry-item-actions button,.empty-slot,.batch-pill,.slot-picker button,.upcoming-batches,.pantry-open):hover:not(:disabled){transform:rotate(-1deg) translateY(-2px)}
 }
-:is(.primary,.secondary,.icon-button,.chip,.craving-chips button,.kind-tabs button,.segmented button,.app-header nav button,.day-jumps button,.stock-days button,.pantry-item-actions button,.alternative,.batch-pill,.slot-picker button):active:not(:disabled){transform:translate(2px,2px);box-shadow:0 0 0 var(--outline)}
+:is(.primary,.secondary,.icon-button,.chip,.craving-chips button,.kind-tabs button,.segmented button,.app-header nav button,.day-jumps button,.stock-days button,.pantry-item-actions button,.batch-pill,.slot-picker button):active:not(:disabled){transform:translate(2px,2px);box-shadow:0 0 0 var(--outline)}
 
 /* ---------- Header ---------- */
 .app-header{position:relative;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:20px;height:76px;padding:0 32px;background:var(--surface);border-bottom:0}
@@ -222,7 +222,7 @@ main{max-width:1800px;margin:auto;padding:34px 32px 0}
 :is(.recipe-media,.portion-media)>.card-img{position:absolute;inset:0}
 .card-fallback{display:grid;place-items:center;overflow:hidden;background-color:var(--food-surface);background-image:var(--pattern);background-size:120px 120px;color:var(--candy-ink)}
 .card-fallback .rat{width:min(88px,58%);height:auto}
-.sticker{position:absolute;left:8px;right:8px;bottom:8px;z-index:1;margin:0;padding:4px 9px;background:var(--surface);color:var(--ink);border:var(--bw) solid var(--outline);border-radius:12px 10px 14px 9px;box-shadow:var(--pop-sm);font-weight:800;line-height:1.2;text-align:left;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;transform:rotate(-1deg)}
+.sticker{position:absolute;left:8px;right:8px;bottom:8px;z-index:1;margin:0;padding:4px 9px;background:var(--surface);color:var(--ink);border:var(--bw) solid var(--outline);border-radius:12px 10px 14px 9px;box-shadow:var(--pop-sm);font-weight:800;line-height:1.2;text-align:left;overflow-wrap:break-word;transform:rotate(-1deg)}
 :nth-child(even)>*>.sticker,:nth-child(even)>.sticker{transform:rotate(1deg)}
 .img-chip{position:absolute;top:8px;left:8px;z-index:1;max-width:calc(100% - 100px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 9px;background:var(--cheese);color:#140B26;border:2px solid var(--outline);border-radius:var(--r-pill);font:800 12px/1.1 var(--font)}
 .thumb{width:28px;height:28px;flex:none;border-radius:50%;border:2px solid var(--outline)}
@@ -324,9 +324,10 @@ main{max-width:1800px;margin:auto;padding:34px 32px 0}
 .portion .drag-handle{position:absolute;top:6px;right:6px;z-index:2;display:grid;place-items:center;width:32px;height:32px;border:var(--bw) solid var(--outline);border-radius:50%;background:var(--surface);color:var(--ink)}
 .portion .drag-handle .ui-icon{width:18px;height:18px}
 /* Pin = her own choice. Hover (or focus) turns it into an unpin button; one tap hands the portion back to the planner. */
-.pin-button{position:absolute;top:8px;left:8px;z-index:2;display:grid;place-items:center;width:26px;height:26px;border:2px solid var(--outline);border-radius:50%;background:var(--cheese);color:var(--candy-ink);cursor:pointer;transition:background var(--t) var(--ease-out),transform var(--t) var(--ease-out)}
+.pin-button,.pin-mark{position:absolute;top:8px;left:8px;z-index:2;display:grid;place-items:center;width:26px;height:26px;border:2px solid var(--outline);border-radius:50%;background:var(--cheese);color:var(--candy-ink);cursor:pointer;transition:background var(--t) var(--ease-out),transform var(--t) var(--ease-out)}
 .pin-button::before{content:"";position:absolute;inset:-7px}
-.pin-button .ui-icon{grid-area:1/1;width:15px;height:15px;stroke-width:2.4}
+.pin-mark{cursor:default}
+.pin-button .ui-icon,.pin-mark .ui-icon{grid-area:1/1;width:15px;height:15px;stroke-width:2.4}
 .pin-button .pin-off{opacity:0;transform:scale(.4) rotate(-90deg);transition:opacity var(--t),transform var(--t) var(--ease-out)}
 .pin-button .pin-on{transition:opacity var(--t),transform var(--t) var(--ease-out)}
 .pin-button:hover,.pin-button:focus-visible{background:var(--danger);color:#fff;transform:scale(1.12)}
@@ -345,11 +346,6 @@ main{max-width:1800px;margin:auto;padding:34px 32px 0}
 .portion-foot .use-by:not(.due){position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .portion-foot .use-by.due{padding:0 6px;border-radius:var(--r-pill);background:var(--orange);color:var(--candy-ink)}
 .snack-slot .portion-foot>span:first-child{display:none}
-.alternatives{margin-top:8px}
-.stack-label{display:block;margin:0 0 5px;font-size:11px;font-weight:800;letter-spacing:.06em;color:var(--muted)}
-.alternative{display:flex;align-items:center;gap:7px;width:100%;margin-bottom:5px;padding:4px 8px 4px 4px;border:2px solid var(--outline);border-radius:var(--r-pill);background:var(--surface);color:var(--ink);text-align:left;font-size:12px;font-weight:700;line-height:1.25}
-.alternative>span{min-width:0}
-.alternative b{display:block;font-size:11px;font-weight:700;color:var(--muted)}
 .dragging{opacity:.45}
 .meal-slot.drop-target{background:var(--selected);outline:3px dashed var(--green);outline-offset:-6px}
 .meal-slot.accepting{border-color:var(--green)}
@@ -901,7 +897,7 @@ table{width:100%;border-collapse:collapse;text-align:left}
 .fetch-face{position:absolute;inset:0 0 auto 0;height:100%;overflow:hidden;backface-visibility:hidden;will-change:transform,opacity}
 .fetch-a{background:var(--surface);border:calc(var(--bw)*var(--ik,1)) solid var(--outline);border-radius:calc(var(--r-l)*var(--ik,1))}
 .fetch-a img,.fetch-a .card-fallback{display:grid;width:100%;height:100%;object-fit:cover}
-.fetch-a b{position:absolute;bottom:calc(8px*var(--ik,1));left:calc(8px*var(--ik,1));right:calc(8px*var(--ik,1));overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:calc(4px*var(--ik,1)) calc(9px*var(--ik,1));background:var(--surface);color:var(--ink);border:calc(var(--bw)*var(--ik,1)) solid var(--outline);border-radius:calc(12px*var(--ik,1));font-size:calc(15px*var(--ik,1));line-height:1.25}
+.fetch-a b{position:absolute;bottom:calc(8px*var(--ik,1));left:calc(8px*var(--ik,1));right:calc(8px*var(--ik,1));overflow-wrap:break-word;padding:calc(4px*var(--ik,1)) calc(9px*var(--ik,1));background:var(--surface);color:var(--ink);border:calc(var(--bw)*var(--ik,1)) solid var(--outline);border-radius:calc(12px*var(--ik,1));font-size:calc(15px*var(--ik,1));line-height:1.25}
 .fetch-b .hero-media{margin:0}
 /* The rat that fetched the recipe and now holds the dialog up (placed by motion.js; transform/opacity only). */
 .fetch-hold{position:absolute;will-change:transform}
@@ -1157,8 +1153,9 @@ table{width:100%;border-collapse:collapse;text-align:left}
   .next-list::-webkit-scrollbar{display:none}
   .next-list li{flex:0 0 84%;min-width:0;scroll-snap-align:start}.next-list li:only-child{flex-basis:100%}
   .next-item{height:100%;min-height:64px}
-  .next-text strong{display:-webkit-box;overflow:hidden;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:14.5px}
-  .next-text small{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .next-text strong{font-size:14.5px;line-height:1.22;overflow-wrap:break-word}
+  .next-list .next-go{display:none}
+  .next-text small{overflow-wrap:break-word}
   .plan-card .plan-cta{flex:1 1 150px;font-size:17px;padding:0 10px;gap:6px}
   .plan-card .plan-fine{flex:none;font-size:13px}
   .planner-footer{flex-wrap:wrap}.planner-footer>span{flex-basis:100%}
