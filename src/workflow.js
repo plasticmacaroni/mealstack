@@ -1,5 +1,6 @@
 import {addDays,dayOf,preparationDate} from './engine.js';
 
+
 export const LOW_CLEANUP_LIMIT=8;
 
 // A batch is prepared once, even when its portions appear on several days.
@@ -13,6 +14,16 @@ export function preparationDays(state) {
     groups.get(date).push(batch);
   }
   return [...groups].sort(([a],[b])=>a.localeCompare(b)).map(([date,batches])=>({date,batches:batches.sort((a,b)=>a.startSlot.localeCompare(b.startSlot)||a.id.localeCompare(b.id))}));
+}
+
+// Cook-day markers: each day of the shown week with the batches cooked that day. when:
+// 'day' = cooked for a meal that day, 'night-before' = cooked that evening for a packed meal
+// (or a dinner she cooks ahead), 'prep' = on a prep day. A batch counts once, on the day it is cooked,
+// including a Sunday cook for next week's Monday.
+export function cookDays(state) {
+  return Array.from({length:7},(_,i)=>addDays(state.week,i)).map(date=>({date,batches:state.batches.filter(b=>preparationDate(b)===date)
+    .sort((a,b)=>a.startSlot.localeCompare(b.startSlot)||a.id.localeCompare(b.id))
+    .map(b=>({id:b.id,when:b.prepDate?'prep':b.prepAhead?'night-before':'day'}))}));
 }
 
 export const cookingKey=({id,batch,draft})=>`${batch?`batch:${batch}`:'recipe'}:${id}:${draft.scale}`;

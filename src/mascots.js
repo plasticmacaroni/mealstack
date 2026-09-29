@@ -15,6 +15,8 @@ const HEAD=`<ellipse class="r-fur r-o" cx="32" cy="26.5" rx="15.2" ry="13"/>`;
 const CHEEKS=`<ellipse class="r-cheek" cx="21.4" cy="31" rx="3.3" ry="2"/><ellipse class="r-cheek" cx="42.6" cy="31" rx="3.3" ry="2"/>`;
 const EYES=`<g class="r-look"><g class="r-eyes"><circle class="r-eye" cx="26" cy="25.6" r="2.2"/><circle class="r-eye" cx="38" cy="25.6" r="2.2"/><circle class="r-shine" cx="26.9" cy="24.7" r=".8"/><circle class="r-shine" cx="38.9" cy="24.7" r=".8"/></g></g>`;
 const HAPPY=`<path class="r-stroke" d="M23.3 26.6q2.7-3.2 5.4 0M35.3 26.6q2.7-3.2 5.4 0"/>`;
+const JOY=`<path class="r-stroke" style="stroke-width:2.3" d="M23 27.4l3-3.6 3 3.6M35 27.4l3-3.6 3 3.6"/>`; // ^ ^
+const GRIN=`<path class="r-mouth" d="M26.6 33.1q5.4 7.6 10.8 0q-5.4 1.8-10.8 0z"/>`; // big open smile
 const NOSE=`<ellipse class="r-nose r-o" style="stroke-width:1.8" cx="32" cy="30.5" rx="2.8" ry="2.2"/>`;
 const SMILE=`<path class="r-stroke" d="M29.2 33.4q1.4 1.6 2.8 0q1.4 1.6 2.8 0"/>`;
 const WHISK=`<path class="r-whisk" d="M19.5 31.5l-6.5-1.4M19.5 33.6l-6 1.5M44.5 31.5l6.5-1.4M44.5 33.6l6 1.5"/>`;
@@ -43,11 +45,20 @@ export const RAT_POSES={
   worry: ['0 0 64 64',TAIL+`<g transform="rotate(-14 19 15)"><circle class="r-fur r-o" cx="16.5" cy="16" r="11"/><circle class="r-ear r-o" cx="17.3" cy="17" r="6.6"/></g><g transform="rotate(14 45 15)"><circle class="r-fur r-o" cx="47.5" cy="16" r="11"/><circle class="r-ear r-o" cx="46.7" cy="17" r="6.6"/></g>`+BODY+FEET+HEAD+CHEEKS+EYES+NOSE+`<path class="r-stroke" d="M29.6 34.6q2.4-2 4.8 0"/>`+WHISK+PAWS+`<path class="r-drop" d="M48 13q3 4 0 6q-3-2 0-6z"/>`],
   // Recipe-fetch rat: stands on its left, both paws reaching up to its right to hold the dialog's edge (mirror for the other side).
   hold:  ['0 -2 64 66',tailPath('M19 52C11.5 56.5 5 53 5 46.5C5 42 9 40 11.5 42.5')+`<g class="r-bodyg">`+EARS+BODY+FEET+HEAD+face(HAPPY)+`</g>`+arm(39,39,55.5,22.5)+arm(42,45,56.5,34)+`<circle class="r-paw" cx="56" cy="22" r="3.5"/><circle class="r-paw" cx="57" cy="34" r="3.5"/>`],
+  // Fetch-rat exit (on dialog close): lets go grinning (^ ^), then throws both arms up. Same coordinates as hold/peek.
+  holdjoy:['0 -2 64 66',tailPath('M19 52C11.5 56.5 5 53 5 46.5C5 42 9 40 11.5 42.5')+EARS+BODY+FEET+HEAD+face(JOY,GRIN)+arm(39,39,55.5,22.5)+arm(42,45,56.5,34)+`<circle class="r-paw" cx="56" cy="22" r="3.5"/><circle class="r-paw" cx="57" cy="34" r="3.5"/>`],
+  peekjoy:['1 0 62 46',EARS+HEAD+face(JOY,GRIN)+paw(23,39.5,4.2,3.2)+paw(41,39.5,4.2,3.2)],
+  hooray:['-2 -6 68 70',TAIL+EARS+arm(21,41,9,23)+arm(43,41,55,23)+`<circle class="r-paw" cx="8.5" cy="21.5" r="3.6"/><circle class="r-paw" cx="55.5" cy="21.5" r="3.6"/>`+BODY+FEET+HEAD+face(JOY,GRIN)],
+  // Skip card: a happy rat off to eat out, holding a takeout bag.
+  takeout:['0 -2 64 66',STAND+face(HAPPY)+`<path class="r-handle" d="M26.5 45q5.5-8 11 0"/><path class="r-basket r-o" d="M20.5 44.5h23l-2 13.5H22.5z"/><path class="r-cartl" d="M21 48.5h22"/>`+heart(32,53,.62)+paw(21.5,46)+paw(42.5,46)],
   love:  ['0 -4 64 68',STAND+face(HAPPY)+`<path class="r-heart r-o" d="M32 53C22 47 21 39 26.5 37.8C29 37.3 31 38.8 32 40.6C33 38.8 35 37.3 37.5 37.8C43 39 42 47 32 53Z"/>`+paw(24.5,44)+paw(39.5,44)+heart(12,6,.7)+heart(53,2,.55)],
 };
 export const DECOS={
   sparkle:['-7 -7 14 14',`<path class="r-spark" d="M0-6.5Q.9-.9 6.5 0Q.9.9 0 6.5Q-.9.9-6.5 0Q-.9-.9 0-6.5Z"/>`],
   heart:  ['-7 -7 14 14',`<path class="r-heart" d="M0 5.5C-6.5 1-6.5-4.4-3.2-5.2C-1.5-5.6-.3-4.5 0-3.2C.3-4.5 1.5-5.6 3.2-5.2C6.5-4.4 6.5 1 0 5.5Z"/>`],
+  // Cartoon twinkle (four-point star) and "joy" squiggles; the squiggles are drawn in the rat's own coordinates.
+  twinkle:['-12 -12 24 24',`<path class="d-twinkle" d="M0-11Q1.8-1.8 11 0Q1.8 1.8 0 11Q-1.8 1.8-11 0Q-1.8-1.8 0-11Z"/><circle class="d-twinkle-dot" cx="-1.6" cy="-1.8" r="1.3"/>`],
+  joy:    ['-14 -14 92 52',[[4,27,194],[3,11,216],[9,-1,236],[60,27,-14],[61,11,-36],[55,-1,-56]].map(([x,y,a])=>`<path class="d-joy" transform="translate(${x} ${y}) rotate(${a})" d="M0 0q1.6-2.2 3.2 0t3.2 0t3.2 0"/>`).join('')],
   steam:  ['0 0 24 24',`<path class="d-steam" d="M6 21q-3-4 0-8t0-8"/><path class="d-steam" d="M12 21q-3-4 0-8t0-8"/><path class="d-steam" d="M18 21q-3-4 0-8t0-8"/>`],
   cheese: ['1 4 22 16',`<path class="r-cheese r-o" d="M2.5 17.5 20 8.5l1.5 10z"/><circle class="r-hole" cx="11" cy="15" r="1.4"/><circle class="r-hole" cx="17" cy="14.5" r="1"/>`],
   paw:    ['0 0 24 24',`<ellipse class="d-paw" cx="12" cy="15.5" rx="5" ry="4.2"/><circle class="d-paw" cx="6" cy="9.5" r="2.2"/><circle class="d-paw" cx="10" cy="6.5" r="2.2"/><circle class="d-paw" cx="14" cy="6.5" r="2.2"/><circle class="d-paw" cx="18" cy="9.5" r="2.2"/>`],
@@ -58,6 +69,7 @@ export const ICONS={
   basket:  `<path d="M3.5 10h17l-2 9.5a2 2 0 0 1-2 1.5h-9a2 2 0 0 1-2-1.5z"/><path d="M8 10l3-6M16 10l-3-6M9 14.5v3M12 14.5v3M15 14.5v3"/>`,
   drag:    `<circle cx="9" cy="6" r="1.6" class="i-fill"/><circle cx="15" cy="6" r="1.6" class="i-fill"/><circle cx="9" cy="12" r="1.6" class="i-fill"/><circle cx="15" cy="12" r="1.6" class="i-fill"/><circle cx="9" cy="18" r="1.6" class="i-fill"/><circle cx="15" cy="18" r="1.6" class="i-fill"/>`,
   unpin:   `<path d="M7 7l10 10M17 7 7 17"/>`,
+  pot:     `<path d="M4 10.5h16v6a3.5 3.5 0 0 1-3.5 3.5h-9A3.5 3.5 0 0 1 4 16.5z"/><path d="M2 12h2m16 0h2M8 8h8M9 5.5q-1-1.2 0-2.4M12 5.5q-1-1.2 0-2.4M15 5.5q-1-1.2 0-2.4"/>`,
   pin:     `<path d="M9 3.5h6l-1 5 3.5 3.5h-11L10 8.5z"/><path d="M12 12v8.5"/>`,
   produce: `<path d="M14.5 9.5 5 19l-.5-.5L14 9"/><path d="M6 18.5 15.5 9a3 3 0 0 0-4.2-4.2L4 16z"/><path d="M15 8.5 19.5 4M15.5 9l4 .5M15 8.5 14.5 4.5"/>`,
   meat:    `<path d="M14.5 4a5.5 5.5 0 0 1 3.9 9.4c-1.9 1.9-4.4 1.7-5.9 1.1L9 18a2 2 0 1 1-2.6-.4A2 2 0 1 1 6 15l3.5-3.5c-.6-1.5-.8-4 1.1-5.9A5.5 5.5 0 0 1 14.5 4z"/>`,
