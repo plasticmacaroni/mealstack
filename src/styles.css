@@ -294,7 +294,7 @@ main{max-width:1800px;margin:auto;padding:34px 32px 0}
 .placement-banner>button{display:grid;place-items:center;flex:none;width:36px;height:36px;border:2px solid var(--outline);border-radius:50%;background:var(--surface);color:var(--ink)}
 .banner-rat{width:40px;margin:-6px 0}
 .day-jumps{display:none}
-.week-scroll{overflow-x:auto;padding:4px 4px 10px 0}
+.week-scroll{overflow-x:auto;padding:4px 4px 10px 10px}
 .week-grid{display:grid;grid-template-columns:repeat(7,minmax(136px,1fr));gap:10px;min-width:1000px;align-items:stretch}
 .day-column{min-width:0}
 .day-heading{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;height:58px;margin-bottom:10px;border:var(--bw) solid var(--outline);border-radius:14px 12px 16px 10px;background:var(--candy-c,var(--candy-1));color:var(--candy-ink);box-shadow:var(--pop-sm)}
@@ -323,18 +323,6 @@ main{max-width:1800px;margin:auto;padding:34px 32px 0}
 .portion-media{position:absolute;inset:0;background:var(--food-surface)}
 .portion .drag-handle{position:absolute;top:6px;right:6px;z-index:2;display:grid;place-items:center;width:32px;height:32px;border:var(--bw) solid var(--outline);border-radius:50%;background:var(--surface);color:var(--ink)}
 .portion .drag-handle .ui-icon{width:18px;height:18px}
-/* Pin = her own choice. Hover (or focus) turns it into an unpin button; one tap hands the portion back to the planner. */
-.pin-button,.pin-mark{position:absolute;top:8px;left:8px;z-index:2;display:grid;place-items:center;width:26px;height:26px;border:2px solid var(--outline);border-radius:50%;background:var(--cheese);color:var(--candy-ink);cursor:pointer;transition:background var(--t) var(--ease-out),transform var(--t) var(--ease-out)}
-.pin-button::before{content:"";position:absolute;inset:-7px}
-.pin-mark{cursor:default}
-.pin-button .ui-icon,.pin-mark .ui-icon{grid-area:1/1;width:15px;height:15px;stroke-width:2.4}
-.pin-button .pin-off{opacity:0;transform:scale(.4) rotate(-90deg);transition:opacity var(--t),transform var(--t) var(--ease-out)}
-.pin-button .pin-on{transition:opacity var(--t),transform var(--t) var(--ease-out)}
-.pin-button:hover,.pin-button:focus-visible{background:var(--danger);color:#fff;transform:scale(1.12)}
-.pin-button:hover .pin-on,.pin-button:focus-visible .pin-on{opacity:0;transform:scale(.4) rotate(90deg)}
-.pin-button:hover .pin-off,.pin-button:focus-visible .pin-off{opacity:1;transform:none}
-.pin-button:focus-visible{outline:3px solid var(--sky);outline-offset:2px}
-.pin-button:active{transform:scale(.94)}
 .portion-label{position:absolute;left:6px;right:6px;bottom:6px;z-index:1;padding:4px 8px 5px;border:var(--bw) solid var(--outline);border-radius:12px 10px 14px 9px;background:var(--surface);color:var(--ink);box-shadow:var(--pop-sm);transform:rotate(-1deg)}
 .day-column:nth-child(even) .portion-label{transform:rotate(1deg)}
 .portion-name{display:block;width:100%;padding-bottom:1px;color:inherit;font-size:13px;font-weight:800;line-height:1.18;text-align:left;overflow-wrap:break-word}
@@ -850,6 +838,8 @@ table{width:100%;border-collapse:collapse;text-align:left}
 #toast .toast-rat{width:34px;margin:-8px 0 -6px -6px}
 #toast .toast-text{min-width:0}
 #toast.visible.has-action{pointer-events:auto}
+#toast.has-action{flex-wrap:wrap}
+#toast .toast-alt{flex:none;min-height:36px;margin:-4px -8px -4px 4px;padding:0 14px;border:var(--bw) solid var(--outline);border-radius:var(--r-pill);background:var(--cheese);color:var(--candy-ink);font-weight:800}
 #toast .toast-action{flex:none;min-height:36px;margin:-4px -8px -4px 4px;padding:0 16px;border:var(--bw) solid var(--outline);border-radius:var(--r-pill);background:var(--surface);color:var(--ink);font-weight:800}
 @media screen{body:has(dialog[open]) #toast{top:calc(14px + var(--sat));bottom:auto;transform:translate(-50%,-14px)}body:has(dialog[open]) #toast.visible{transform:translate(-50%,0)}}
 
@@ -1003,7 +993,7 @@ table{width:100%;border-collapse:collapse;text-align:left}
   .board-controls{margin-bottom:6px}.board-controls>div{gap:8px}.board-controls select{max-width:110px}
   .undo-button,.clear-week{min-height:44px}
   .demo-banner{padding:6px 10px 6px 8px;font-size:13px}.banner-rat{width:30px;margin:-4px 0}
-  .day-jumps{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:8px 0}
+  .day-jumps{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:14px 0 8px}
   .day-jumps button{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:48px;padding:5px 0;border:2px solid var(--outline);border-radius:var(--r-s);background:var(--surface)}
   .day-jumps button.is-today{background:var(--cheese);color:var(--candy-ink)}
   .day-jumps span{font-size:11px;font-weight:700}.day-jumps b{font-size:15px;font-weight:800}
@@ -1092,6 +1082,8 @@ table{width:100%;border-collapse:collapse;text-align:left}
   .pantry-results{max-height:39dvh}.pantry-dialog-footer{flex-wrap:wrap;gap:10px}.pantry-dialog-footer>span{width:100%}.pantry-dialog-footer .primary{margin-left:auto}
   .app-footer{align-items:center;padding:20px 16px;font-size:13px}.app-footer>span:last-child{max-width:190px;text-align:right}
 }
+/* 375–389px phones (iPhone SE, mini): the three tabs keep their icons but pack tighter, so the page never scrolls sideways. */
+@media (max-width:389px){.app-header nav{gap:4px}.app-header nav button{padding:0 4px;gap:4px}}
 @media (max-width:374px){.app-header nav .ui-icon{display:none}.app-header nav button{font-size:13px;padding:0 4px}}
 
 /* ---------- Print ---------- */
@@ -1221,14 +1213,11 @@ table{width:100%;border-collapse:collapse;text-align:left}
 @media (prefers-reduced-motion:no-preference){.cook-mark .pot-steam{animation:pot-steam 2.6s ease-in-out infinite}.cook-mark .pot-steam+.pot-steam{animation-delay:.4s}}
 @keyframes pot-steam{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-1.5px);opacity:.95}}
 .day-jumps button{position:relative}
-.chip-pot{position:absolute;top:-8px;right:-6px;display:grid;place-items:center;width:22px;height:20px;padding:1px;border:2px solid var(--outline);border-radius:50%;background:var(--cheese)}
-.chip-pot .pot{width:15px;height:13px}.chip-pot .pot-steam{display:none}
+/* The cook-day pot sits above the chip's corner, clear of the day name even on a 320px phone. */
+.chip-pot{position:absolute;top:-12px;right:-5px;display:grid;place-items:center;width:19px;height:17px;padding:1px;border:2px solid var(--outline);border-radius:50%;background:var(--cheese)}
+.chip-pot .pot{width:13px;height:11px}.chip-pot .pot-steam{display:none}
 /* The card that is the cooking meal: a tiny chef rat on the photo's corner. The pin moves over for it. */
-.chef-sticker{position:absolute;top:5px;left:5px;z-index:2;display:grid;place-items:center;width:32px;height:32px;border:2px solid var(--outline);border-radius:50%;background:var(--cheese);box-shadow:var(--pop-sm);pointer-events:none}
-.chef-sticker .rat{width:25px;height:28px;margin-top:-3px}
-.portion.is-cooking :is(.pin-button,.pin-mark){left:42px}
 /* Past its enjoy-by but still fine: a small "softer" tag where "Last day" goes. */
-.soft-tag{padding:0 7px;border:1.5px dashed var(--outline);border-radius:var(--r-pill);background:var(--surface-soft);color:var(--ink);font-weight:800}
 /* Skip card */
 .skip-card{position:relative;flex:1 0 176px;display:flex;border:var(--bw) dashed var(--outline);border-radius:14px;background:var(--surface);box-shadow:var(--pop-sm);cursor:grab}
 .snack-slot .skip-card{flex-basis:118px}
@@ -1332,4 +1321,174 @@ body.card-drag .skip-zone{display:flex}
   .skip-zone{bottom:calc(12px + env(safe-area-inset-bottom))}
   .plan-card .style-chip{flex:0 1 auto;min-height:40px}.plan-card .style-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 }
-@media print{.style-chip,.cook-mark,.chip-pot,.skip-zone,.chef-sticker,.extra-actions,.batch-quick,.style-choice{display:none!important}.skip-card{border:1px dashed #000}}
+@media print{.style-chip,.cook-mark,.chip-pot,.skip-zone,.extra-actions,.batch-quick,.style-choice{display:none!important}.skip-card{border:1px dashed #000}}
+
+/* ---------- Round 3: the yarn string, the knot, card states ---------- */
+/* One candy colour per batch (assigned in calendar order), flat, with a dark casing. */
+:root{--s0:#FF5FA2;--s1:#4CC9F0;--s2:#3DDC97;--s3:#FF8C42;--s4:#B28DFF;--s5:#FFD23F;--str-warn:#FF5A5A;--mushy:#C9E86B}
+:root[data-theme="light"]{--s0:#FF3D8B;--s1:#1FA5D6;--s2:#19B97A;--s3:#F2741F;--s4:#8B5CF6;--s5:#E0A000;--str-warn:#D92B2B;--mushy:#C9E86B}
+.week-grid{position:relative}
+.str-layer{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.str-under{z-index:0}
+.str-over{z-index:3}
+.portion{z-index:1}
+.str-layer path{fill:none;stroke-linecap:round;stroke-linejoin:round}
+.str-layer .str-case{stroke:var(--outline)}
+.str-bead{stroke:var(--outline);stroke-width:2.2}
+.str-batch{transition:opacity var(--t)}
+.str-batch.is-dim{opacity:.22}
+/* Focus: the batch's cards stay, the others step back. */
+.week-grid.str-focusing .portion:not(.str-on){opacity:.36}
+.week-grid .portion{transition:opacity var(--t)}
+.portion.str-on{outline:3px solid var(--c);outline-offset:2px}
+.str-chip{position:absolute;z-index:4;display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border:2px solid var(--outline);border-radius:var(--r-pill);background:var(--surface);color:var(--ink);font-size:11px;font-weight:800;line-height:1.35;white-space:nowrap;box-shadow:var(--pop-sm);pointer-events:none;transform:translate(-50%,-50%)}
+.str-chip i{display:inline-block;width:9px;height:9px;border:1.5px solid var(--outline);border-radius:50%;background:var(--surface)}
+.str-chip.is-c{background:var(--c);color:var(--candy-ink)}
+.str-chip.is-warn{background:var(--str-warn);color:#fff}
+.str-chip.is-edge{z-index:2}
+/* The knot: the batch's first (cook) meal, and the whole-batch handle. */
+.knot{position:absolute;z-index:4;display:grid;place-items:center;width:34px;height:26px;margin:-13px 0 0 -17px;padding:0;border:0;background:none;touch-action:none;cursor:grab;transition:opacity var(--t),transform var(--t) var(--ease-bounce)}
+.knot::before{content:"";position:absolute;inset:-8px -4px}
+/* A finger held on the knot starts a drag, never iOS text selection or the long-press callout. */
+.knot{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.knot-art{width:34px;height:24px;overflow:visible}
+.knot-art path{fill:none;stroke-linecap:round}
+.knot-case{stroke:var(--outline);stroke-width:6.5}
+.knot-loop{stroke:var(--c);stroke-width:3}
+.knot-bead{fill:var(--c);stroke:var(--outline);stroke-width:2.4}
+.knot:hover,.knot.is-on{transform:scale(1.15)}
+.knot:active{cursor:grabbing}
+.knot.is-dim{opacity:.3}
+.knot:focus-visible{outline:3px solid var(--sky);outline-offset:3px;border-radius:12px}
+/* Portion chip "1/3" in the top-left corner; the cook meal's chip wears the chef rat. */
+.portion-chip{position:absolute;top:6px;left:6px;z-index:2;display:inline-flex;align-items:center;gap:2px;height:26px;padding:0 8px;border:2px solid var(--outline);border-radius:var(--r-pill);background:var(--surface);color:var(--ink);font-size:12px;font-weight:800;line-height:1;box-shadow:var(--pop-sm);pointer-events:none;white-space:nowrap}
+.portion-chip.is-cook{padding-left:2px;background:var(--cheese);color:var(--candy-ink)}
+.portion-chip .chip-rat{width:22px;height:24px;margin:-2px 0 0}
+.snack-slot .portion-chip{height:22px;font-size:11px}
+/* Card states: mushy (small tag), past fridge-safe (red band), wrong meal type (small note). */
+.mushy-tag{padding:0 7px;border:1.5px solid var(--outline);border-radius:var(--r-pill);background:var(--mushy);color:#140B26;font-weight:800}
+.type-note{padding:0 6px;border:1.5px dashed var(--line-strong);border-radius:var(--r-pill);color:var(--muted);font-weight:700}
+.unsafe-band{position:absolute;left:0;right:0;top:0;z-index:2;display:flex;align-items:center;gap:5px;padding:4px 8px;border-bottom:2px solid var(--outline);background:var(--str-warn);color:#fff;font-size:11px;font-weight:800;line-height:1.2}
+.unsafe-band b{display:grid;place-items:center;flex:none;width:16px;height:16px;border-radius:50%;background:#fff;color:var(--str-warn);font-size:11px}
+.portion.is-unsafe{border-color:var(--str-warn);box-shadow:3px 3px 0 var(--str-warn)}
+.portion.is-unsafe .portion-chip{top:32px}
+.portion.is-unsafe .drag-handle{top:30px}
+/* Whole-batch drag: the lifted stack, its count, and where it would land. */
+.portion.left-behind{opacity:.3}
+.meal-slot.knot-target{outline:3px dashed var(--c,var(--green));outline-offset:-6px;background:var(--selected)}
+.meal-slot.knot-bump{outline-color:var(--str-warn)}
+.meal-slot.knot-bump::after{content:attr(data-bump);position:absolute;left:50%;top:48%;z-index:5;padding:2px 9px;border:2px solid var(--outline);border-radius:var(--r-pill);background:var(--str-warn);color:#fff;font-size:12px;font-weight:800;white-space:nowrap;transform:translate(-50%,-50%);pointer-events:none}
+body.knot-dragging,body.knot-dragging *{cursor:grabbing!important;user-select:none}
+.knot-ghost{position:fixed;left:0;top:0;z-index:10000;width:var(--gw);height:var(--gh);margin:-30px 0 0 calc(var(--gw) * -.5);pointer-events:none}
+.knot-ghost>.portion,.knot-ghost>.kg-stack{position:absolute;inset:0;transform:rotate(-5deg) scale(.86)}
+.knot-ghost>.portion{outline:3px solid var(--c);box-shadow:6px 6px 0 var(--outline);opacity:1!important}
+.knot-ghost>.kg-stack{border:2.5px solid var(--outline);border-radius:14px;background:var(--c)}
+.knot-ghost>.kg-stack:first-child{transform:translate(12px,12px) rotate(1deg) scale(.86)}
+.knot-ghost>.kg-stack:nth-child(2){transform:translate(6px,6px) rotate(-2deg) scale(.86)}
+.knot-ghost .kg-card{display:grid;place-items:center;padding:12px;background:var(--c)}
+.kg-badge{position:absolute;top:-4px;right:0;z-index:2;display:grid;place-items:center;min-width:28px;height:28px;padding:0 7px;border:2px solid var(--outline);border-radius:var(--r-pill);background:var(--c);color:var(--candy-ink);font-size:14px;font-weight:900}
+.kg-knot{position:absolute;left:4px;top:70px;z-index:2;--c:inherit}
+.kg-knot .knot-art{width:40px;height:28px}
+.kg-hint{position:absolute;right:calc(100% + 10px);top:38%;z-index:2;width:max-content;max-width:250px;padding:5px 10px;border:2px solid var(--outline);border-radius:12px;background:var(--surface);color:var(--ink);font-size:12px;line-height:1.35;box-shadow:var(--pop-sm)}
+.knot-ghost.hint-right .kg-hint{right:auto;left:calc(100% + 10px)}
+@media (max-width:760px){.kg-hint{right:auto;left:50%;top:auto;bottom:calc(100% + 16px);transform:translateX(-50%)}.knot-ghost.hint-right .kg-hint{left:50%}}
+.kg-hint:empty{display:none}
+.kg-hint b{display:block;font-weight:800}.kg-hint small{display:block;color:var(--muted);font-weight:700}
+/* Draw-in when a string is created or moved (never under reduced motion). */
+@media (prefers-reduced-motion:no-preference){
+  .str-draw .str-yarn[pathLength]{stroke-dasharray:1;stroke-dashoffset:1;animation:str-draw .55s var(--ease-out) forwards}
+  .str-draw .str-case{opacity:0;animation:str-case .55s var(--ease-out) forwards}
+  .knot.str-pop{animation:knot-pop .45s var(--ease-bounce)}
+}
+@keyframes str-draw{to{stroke-dashoffset:0}}
+@keyframes str-case{60%{opacity:0}to{opacity:1}}
+@keyframes knot-pop{from{transform:scale(.3)}}
+/* Week fixes next to Undo. */
+.week-fixes{flex-wrap:wrap;justify-content:flex-end}
+.tidy-week,.replan-open{min-height:38px;padding:0 14px!important;border:2px solid var(--outline)!important;border-radius:var(--r-pill);background:var(--surface);color:var(--ink);font-size:13px!important;text-decoration:none!important}
+.tidy-week{display:inline-flex;align-items:center;gap:5px;background:var(--cheese);color:var(--candy-ink)}
+.tidy-icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round}
+/* The knot menu: a popover beside the knot (desktop), a bottom sheet (phone). */
+.calendar-panel{position:relative}
+.knot-menu-wrap .km-scrim{display:none}
+.knot-menu{position:absolute;z-index:30;width:360px;padding:12px;border:var(--bw) solid var(--outline);border-radius:18px;background:var(--surface);color:var(--ink);box-shadow:var(--pop-lg);font-size:13px;line-height:1.35}
+.knot-menu::before{content:"";position:absolute;left:-11px;top:var(--at,34px);width:18px;height:18px;background:var(--surface);border-left:var(--bw) solid var(--outline);border-bottom:var(--bw) solid var(--outline);transform:rotate(45deg)}
+.knot-menu.is-flip::before{left:auto;right:-11px;transform:rotate(-135deg)}
+.knot-menu:focus{outline:none}
+.km-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.km-thumb{position:relative;flex:none;width:44px;height:44px;overflow:hidden;border:2px solid var(--outline);border-radius:10px}
+.km-thumb .card-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.km-head h3{font-size:15px;font-weight:900;line-height:1.2}
+.km-head small{color:var(--muted);font-weight:700}
+.km-head>div{flex:1;min-width:0}
+.km-x{flex:none;width:34px;height:34px;align-self:flex-start}
+.km-dates{display:flex;margin:6px 0 10px;overflow:hidden;border:2px solid var(--outline);border-radius:12px;font-size:11.5px;font-weight:800;text-align:center}
+.km-d{flex:1;padding:5px 3px;border-right:2px solid var(--outline);color:var(--candy-ink)}
+.km-d:last-child{border-right:0}
+.km-d.is-cook{background:var(--c)}.km-d.is-best{background:var(--mint)}
+.km-d.is-mushy{background:var(--mushy);color:#140B26}.km-d.is-unsafe{background:var(--str-warn);color:#fff}
+.km-warn{display:flex;align-items:flex-start;gap:6px;margin:0 0 10px;padding:6px 8px;border:2px solid var(--str-warn);border-radius:10px;font-size:12.5px;font-weight:800}
+.km-warn b{display:grid;place-items:center;flex:none;width:18px;height:18px;border-radius:50%;background:var(--str-warn);color:#fff;font-size:12px}
+.km-btn{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;margin:0 0 7px;padding:8px 10px;border:2px solid var(--outline);border-radius:12px;background:var(--surface-soft);color:var(--ink);text-align:left;font-size:13.5px;font-weight:800;line-height:1.25}
+.km-btn.km-main{background:var(--c);color:var(--candy-ink);box-shadow:var(--pop-sm)}
+.km-btn.km-main[aria-disabled=true]{background:var(--surface-soft);color:var(--muted);box-shadow:none}
+.km-btn i{flex:none;display:grid;place-items:center;width:28px;height:28px;border:2px solid var(--outline);border-radius:50%;background:var(--surface);color:var(--ink);font-style:normal;font-size:15px}
+.km-btn i .tidy-icon{width:16px;height:16px}
+.km-btn small{display:block;margin-top:1px;font-size:11.5px;font-weight:700;opacity:.85}
+.km-btn.km-label{margin-bottom:5px;border-color:transparent;background:none;padding:2px 10px}
+.km-group{margin:0 0 7px;padding:4px 0 7px;border:2px solid var(--outline);border-radius:12px;background:var(--surface-soft)}
+.km-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;padding:0 8px}
+.km-weeks{display:flex;gap:4px;padding:5px 8px 0}.km-weeks .km-day{flex:1}
+.km-day{min-width:0;min-height:34px;padding:0 2px;border:2px solid var(--outline);border-radius:9px;background:var(--surface);color:var(--ink);font-size:11.5px;font-weight:800}
+.km-day.is-on,.km-day[aria-pressed=true]{background:var(--c);color:var(--candy-ink);opacity:1}
+.km-day:hover:not(:disabled){background:var(--surface-hover)}
+.km-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:4px;font-size:12.5px;font-weight:800;color:var(--accent-ink)}
+.km-foot .text-button{min-height:36px;padding:0;color:var(--accent-ink);font-weight:800}
+@media (max-width:760px){
+  .week-scroll{padding-left:10px}
+  .knot-menu-wrap .km-scrim{display:block;position:fixed;inset:0;z-index:9990;background:rgba(10,4,20,.55)}
+  .knot-menu{position:fixed;left:0!important;right:0;bottom:0;top:auto!important;z-index:9991;width:auto;max-height:86dvh;overflow:auto;padding:22px 16px calc(18px + env(safe-area-inset-bottom));border-bottom:0;border-radius:22px 22px 0 0;box-shadow:none;font-size:14px}
+  .knot-menu::before,.knot-menu.is-flip::before{left:50%;right:auto;top:8px;width:44px;height:5px;margin-left:-22px;border:0;border-radius:4px;background:var(--line-strong);transform:none}
+  .km-days,.km-weeks{padding:0 8px}.km-weeks{padding-top:6px}
+  .km-day{min-height:40px}
+  /* One row on a phone: the snacks switch, then Undo · Tidy · Re-plan · Clear (wraps only when snack options show or below 375px). */
+  .board-controls{row-gap:6px}
+  .board-controls>div:first-child{flex:none}
+  .board-controls>.week-fixes{flex:1 1 0;min-width:0;flex-wrap:nowrap;justify-content:flex-end;gap:5px}
+  .board-controls:has(select)>.week-fixes{flex-basis:100%}
+  @media (max-width:374px){.board-controls>.week-fixes{flex-basis:100%;justify-content:flex-start}}
+  .board-controls .snack-show{font-style:normal;position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .week-fixes .long{display:none}
+  .week-fixes>button{flex:0 1 auto;min-width:0;min-height:44px;padding:0 8px!important;font-size:12.5px!important;white-space:nowrap;justify-content:center}
+  .week-fixes .tidy-icon{display:none}
+  .plan-card .style-chip b::before{content:"Cooking: ";font-weight:600}
+  .plan-card .style-chip .style-change{display:none}
+}
+@media print{.str-layer,.str-chip,.knot,.knot-menu-wrap,.knot-ghost,.tidy-week,.replan-open,.portion-chip .chip-rat{display:none!important}.unsafe-band{border-bottom:1px solid #000}}
+.snack-text,.snack-show{font-style:normal}
+
+/* ---------------- Lock in (round 4): a tiny flat padlock; calm, but visible at a glance ---------------- */
+.lock-icon,.knot-lock{overflow:visible}
+.lock-icon .lock-shackle,.knot-lock .lock-shackle{fill:none;stroke:var(--outline);stroke-width:2.6;stroke-linecap:round}
+.lock-icon .lock-body,.knot-lock .lock-body{fill:var(--cheese);stroke:var(--outline);stroke-width:2.2}
+.lock-icon .lock-hole{fill:var(--outline)}
+/* On the knot: a small badge tucked on the bead's upper right, only when locked. */
+.knot-lock{position:absolute;right:-5px;top:-11px;width:18px;height:18px;display:none;pointer-events:none}
+.knot.is-locked .knot-lock{display:block}
+/* Batch menu row and batch details button. */
+.km-btn.km-lock i .lock-icon{width:17px;height:17px}
+.km-btn.km-lock:not(.is-locked) i .lock-body{fill:var(--surface)}
+.km-btn.km-lock:not(.is-locked) i .lock-shackle{transform:translate(3.5px,-1.5px) rotate(14deg);transform-origin:16px 11px}
+.km-btn.km-lock.is-locked{background:var(--selected)}
+.lock-toggle{display:inline-flex;align-items:center;gap:6px}
+.lock-toggle .lock-icon{width:17px;height:17px;flex:none}
+.lock-toggle:not(.is-locked) .lock-body{fill:var(--surface)}
+.lock-toggle:not(.is-locked) .lock-shackle{transform:translate(3.5px,-1.5px) rotate(14deg);transform-origin:16px 11px}
+.lock-toggle.is-locked{background:var(--selected)}
+/* Your batches: a tiny padlock after the title. */
+.pill-lock{display:inline-block;margin-left:5px;vertical-align:-2px}
+.pill-lock .lock-icon{width:13px;height:13px}
+/* Snacks hidden and the batch starts on a snack: a quiet note on the card that carries its knot. */
+.portion-foot>.start-note{white-space:normal}
+.start-note{padding:0 6px;border:1.5px dashed var(--line-strong);border-radius:var(--r-pill);color:var(--muted);font-weight:700}
+@media print{.knot-lock,.lock-toggle{display:none!important}}

@@ -9,7 +9,7 @@ export function endOfDay(state,date,result=schedule(state)) {
     placed[cell.chosen]=(placed[cell.chosen]||0)+1;const d=dayOf(cell.id);if(!last[cell.chosen]||d>last[cell.chosen])last[cell.chosen]=d;
     if(d<=date)spent[cell.chosen]=(spent[cell.chosen]||0)+1;
   }
-  // Food she planned for a meal after its enjoy-by (a "softer" meal, still fine) is not overdue before
+  // Food she planned for a meal after its enjoy-by (a "mushy" meal, still fine) is not overdue before
   // that meal: with nothing left over in the fridge, it is due on its last planned day.
   const eatBy=b=>(placed[b.id]||0)>=b.portions&&last[b.id]>b.useBy?last[b.id]:b.useBy;
   const cooked=state.batches.filter(b=>eatBy(b)>=state.week&&preparationDate(b)<=date)

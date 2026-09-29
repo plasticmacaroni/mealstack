@@ -1,5 +1,5 @@
 import {RECIPES} from './data.js';
-import {addDays,localDate,monday,slot,dayOf,typeOf,rank,makeBatch,schedule,shopping,purchaseFor,batchCost,price,removeBatches,prepDayFor,prepFloor,SOFT_DAYS,DEFAULT_COOK_STYLE} from './engine.js';
+import {addDays,localDate,monday,slot,dayOf,typeOf,rank,makeBatch,schedule,shopping,purchaseFor,batchCost,price,removeBatches,prepDayFor,prepFloor,PREP_REACH,DEFAULT_COOK_STYLE} from './engine.js';
 import {matchesQuery} from './discovery.js';
 
 export const menuSignature = batches => [...new Set(batches.map(b=>b.recipeId))].sort().join('|');
@@ -49,15 +49,21 @@ export function planningWeek(week,now=new Date()) {
 export function suggestPlan(state, {budget=100,maxCost=3,maxActive=20,style='simple',avoid=state.avoid||'',seed=randomSeed(),recentPlans=[],scope='mains',meals,matchIngredients=false,now=null,cookStyle=state.cookStyle||DEFAULT_COOK_STYLE}={}) {
   const earliest=now?rank(firstPlannableSlot(now)):-Infinity;
   const selected=['breakfast','lunch','dinner'].filter(type=>(meals??(scope==='dinners'?['dinner']:['lunch','dinner'])).includes(type));
-  if(!selected.length)return {state:structuredClone(state),added:[],replaced:[],unfilled:0,repeated:false};
+  if(!selected.length)return {state:structuredClone(state),added:[],replaced:[],kept:{locked:[],started:[],other:[]},unfilled:0,repeated:false};
   const matching=matchIngredients===true;
   const end=addDays(state.week,6);
-  // Preserve batches serving unchecked meals, including shared lunch/dinner batches,
-  // and suggested batches she has moved a meal of: those are her choices now.
+  // Only unlocked batches (b.autoPlanned: suggestions she hasn't locked in or edited) are replaced;
+  // batches serving unchecked meals (including shared lunch/dinner batches) and ones already under way stay.
   const existing=schedule(state),outsideSelection=new Set(Object.values(existing.cells)
-    .filter(c=>c.chosen&&(c.manual||!selected.includes(typeOf(c.id)))).map(c=>c.chosen));
+    .filter(c=>c.chosen&&!selected.includes(typeOf(c.id))).map(c=>c.chosen));
   const replaced=state.batches.filter(b=>b.autoPlanned&&selected.includes(typeOf(b.startSlot))&&!outsideSelection.has(b.id)
     &&dayOf(b.startSlot)>=state.week&&dayOf(b.startSlot)<=end&&rank(b.startSlot)>=earliest);
+  // What it leaves alone, for an honest message: locked batches, and unlocked ones it can't replace
+  // (already started, or serving a meal it isn't planning). Batches cooked or eaten in this week.
+  const replacedIds=new Set(replaced.map(b=>b.id)),mealsIn=new Set(Object.values(existing.cells).filter(c=>c.chosen&&dayOf(c.id)>=state.week&&dayOf(c.id)<=end).map(c=>c.chosen));
+  const around=state.batches.filter(b=>!replacedIds.has(b.id)&&((dayOf(b.startSlot)>=state.week&&dayOf(b.startSlot)<=end)||mealsIn.has(b.id)));
+  const kept={locked:around.filter(b=>!b.autoPlanned),started:[],other:[]};
+  for(const b of around)if(b.autoPlanned)kept[rank(b.startSlot)<earliest||dayOf(b.startSlot)<state.week?'started':'other'].push(b);
   const base=removeBatches(state,replaced.map(b=>b.id));
   // Slots already holding a meal are off limits: new batches only take empty slots.
   // Skipped slots stay skipped: nothing is planned for them.
@@ -96,12 +102,12 @@ export function suggestPlan(state, {budget=100,maxCost=3,maxActive=20,style='sim
         const prepDate=prepDayFor(cookStyle,target,floor);
         const prepAhead=!prepDate&&['breakfast','lunch'].includes(typeOf(target));
         const useBy=prepDate?addDays(prepDate,r.qualityDays):addDays(dayOf(target),r.qualityDays-(prepAhead?1:0));
-        const reach=prepDate?[useBy,addDays(prepDate,SOFT_DAYS)].sort().at(-1):useBy;
+        const reach=prepDate?[useBy,addDays(prepDate,PREP_REACH)].sort().at(-1):useBy;
         const open=targets.filter(id=>rank(id)>=rank(target)&&dayOf(id)<=reach&&!taken.has(id)&&!next.placements[id]&&suitable(r,id)
           &&(!anchorSlot||target===anchorSlot||id!==anchorSlot));
         const portions=fresh?1:Math.min(r.servings,open.length),scale=portions/r.servings;
-        // Prep days: meals past the enjoy-by are fine but a little softer, so longer-keeping food wins.
-        const softer=open.slice(0,portions).filter(id=>dayOf(id)>useBy).length;
+        // Prep days: meals past the enjoy-by are fine but a little mushy, so longer-keeping food wins.
+        const mushy=open.slice(0,portions).filter(id=>dayOf(id)>useBy).length;
         if(!portions||scale<.25)continue;
         let basket=current.basket,newItems=0,wasteChange=0;
         for(const ingredient of r.ingredients) {
@@ -124,12 +130,12 @@ export function suggestPlan(state, {budget=100,maxCost=3,maxActive=20,style='sim
           ? repetition+(recentPenalty.get(r.id)||0)*.5+priorities.get(r.id)*.25+effort
             +newItems/portions*.8+wasteChange/portions*2+(basket-current.basket)/portions*.1
           : (basket-current.basket)/portions*.4+effort+repetition+(recentPenalty.get(r.id)||0)+priorities.get(r.id)+1/portions;
-        candidates.push({r,scale,portions,open:open.slice(0,portions),score:score+softer*1.5/portions,useBy,prepAhead,prepDate,newItems});
+        candidates.push({r,scale,portions,open:open.slice(0,portions),score:score+mushy*1.5/portions,useBy,prepAhead,prepDate,newItems});
       }
       candidates.sort((a,b)=>a.score-b.score);
       const best=candidates[0];if(!best)continue;
       const b={...makeBatch(best.r.id,target,best.scale,best.portions),useBy:best.useBy,autoPlanned:true,mealTypes:selected.filter(t=>best.r.kind==='breakfast'?t==='breakfast':t!=='breakfast'),...(best.prepAhead?{prepAhead:true}:{}),...(best.prepDate?{prepDate:best.prepDate}:{})};
-      next.batches.push(b);added.push(b);for(const id of best.open)next.placements[id]=b.id;next.auto[b.id]=[...best.open];count(best.r);
+      next.batches.push(b);added.push(b);for(const id of best.open)next.placements[id]=b.id;count(best.r);
     }
     const unfilled=targets.filter(id=>!taken.has(id)&&!next.placements[id]).length;
     const repeated=recentSignatures.has(menuSignature(added));
@@ -139,7 +145,7 @@ export function suggestPlan(state, {budget=100,maxCost=3,maxActive=20,style='sim
     const varietyTarget=Math.min(3,added.length+protectedBatches.length);
     const varietyGap=Math.max(0,varietyTarget-proteinCounts.size)+Math.max(0,varietyTarget-cuisineCounts.size);
     // A menu with fewer than three proteins or cuisines ranks behind any varied one.
-    attempts.push({state:next,added,replaced,unfilled,repeated,quality:(added.length-distinct)*30+varietyGap*20+recency-diversity,
+    attempts.push({state:next,added,replaced,kept,unfilled,repeated,quality:(added.length-distinct)*30+varietyGap*20+recency-diversity,
       ...(matching?{...shoppingFootprint(next),duplicateRecipes:added.length-distinct,varietyGap}:{})});
   }
   // Matching preserves coverage and variety, then avoids recently shown menus
@@ -149,7 +155,7 @@ export function suggestPlan(state, {budget=100,maxCost=3,maxActive=20,style='sim
     ||Number(a.repeated)-Number(b.repeated)
     ||(matching?a.waste-b.waste||a.itemsToBuy-b.itemsToBuy:0)||a.quality-b.quality);
   const best=attempts[0];
-  if(!best.added.length)return {state:structuredClone(state),added:[],replaced:[],unfilled:targets.filter(id=>!schedule(state).cells[id]?.chosen).length,repeated:false};
+  if(!best.added.length)return {state:structuredClone(state),added:[],replaced:[],kept,unfilled:targets.filter(id=>!schedule(state).cells[id]?.chosen).length,repeated:false};
   return best;
 }
 

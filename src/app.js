@@ -7,7 +7,7 @@ import {LOW_CLEANUP_LIMIT,preparationDays,cookDays,cookingKey,readCookingProgres
 import {cleanupFor} from './equipment.js';
 import {pantryMeasure,pantryValue,pantryAmount,pantryShortfall,formatNumber} from './measurements.js';
 import {RECIPES,INGREDIENTS,SOURCES,METHOD_NAMES,DATA_NOTE} from './data.js';
-import {recipeById,localDate,addDays,monday,slot,dayOf,preparationDate,typeOf,SLOT_LABELS,TYPES,activeTypes,money,price,ingredientCost,batchCost,yieldFor,quantity,emptyState,makeBatch,demoState,schedule,moveMeal,putBack,originalSpot,slideBatch,saveBatch,removeBatches,batchWindow,slotName,dayName,addBatchAt,shopping,validateState,currentRecipeId,styledBatch,keepsUntil,freshness,isCooked,skipSlot,moveSkip,removeSkip,updateSkip,skipSpend,tossExtra,cookSmaller,canCookSmaller,placeExtra,prepFloor,prepDayFor,resetSettings,DEFAULT_COOK_STYLE,SKIP_LIMITS} from './engine.js';
+import {recipeById,localDate,addDays,monday,slot,dayOf,preparationDate,typeOf,SLOT_LABELS,TYPES,activeTypes,money,price,ingredientCost,batchCost,yieldFor,quantity,emptyState,makeBatch,demoState,schedule,moveMeal,slideBatch,straightenBatch,tidyWeek,fridgeLate,fitsType,daysAfterCooking,batchMeals,slideDaysTo,isLocked,setLocked,setSnackCount,saveBatch,removeBatches,batchWindow,slotName,dayName,addBatchAt,shopping,validateState,currentRecipeId,styledBatch,keepsUntil,freshness,isCooked,skipSlot,moveSkip,removeSkip,updateSkip,skipSpend,tossExtra,cookSmaller,canCookSmaller,placeExtra,prepFloor,prepDayFor,resetSettings,DEFAULT_COOK_STYLE,SKIP_LIMITS} from './engine.js';
 import {cookingSteps,STORAGE_GUIDANCE,SAFETY_URL,STORAGE_URL} from './cookbook.js';
 import {matchesQuery,parseQuery,CRAVINGS,featuredOrder} from './discovery.js';
 import {suggestPlan,planningWeek,AISLES,aisleFor} from './planning.js';
@@ -15,6 +15,7 @@ import {count,pluralize} from './text.js';
 import {ingredientRat,IR_CSS,IR_TOKENS} from './ingredient-rats.js';
 import {watchRats} from './rat-watch.js';
 import {injectMascots,rat,ratLive,deco,icon as uiIcon} from './mascots.js';
+import {drawStrings,watchGrid,KNOT_SVG as KNOT_ART} from './strings.js';
 import {reduceMotion,markViewEnter,runFlashes,flashAfterRender,fx,hop,syncLoops,fetchCard,duck} from './motion.js';
 
 const $=s=>document.querySelector(s);
@@ -26,12 +27,14 @@ const ui={view:'week',plannerView:'calendar',ingredient:null,q:'',kind:'all',met
 const MATCH_INGREDIENTS_STORE='mealstack.match-ingredients';
 ui.matchIngredients=true;
 try {ui.matchIngredients=localStorage.getItem(MATCH_INGREDIENTS_STORE)!=='false';} catch {}
-const COOKING_STORE='mealstack.cooking.v1';
+const COOKING_STORE='mealstack.cooking.v1',PREP_DAYS_STORE='mealstack.prep-days';
 try {ui.cookProgress=readCookingProgress(localStorage.getItem(COOKING_STORE));} catch {}
 // Keep only a small recipe-ID history; previews never mutate the saved meal plan.
 const RECENT_PLANS_STORE='mealstack.recent-plans.v1';
 try {const saved=JSON.parse(localStorage.getItem(RECENT_PLANS_STORE)||'[]');if(Array.isArray(saved))ui.recentPlans=saved.slice(-12).filter(ids=>Array.isArray(ids)&&ids.length<=200).map(ids=>ids.map(currentRecipeId)).filter(ids=>ids.every(id=>Object.hasOwn(recipeById,id)));} catch {}
-const fmt=(date,options)=>new Date(date+'T12:00:00').toLocaleDateString('en-US',options);
+// Dates are formatted many times per render; remember each answer (same output, no new Intl formatter per call).
+const FMT=new Map();
+const fmt=(date,options)=>{const k=date+JSON.stringify(options);let v=FMT.get(k);if(v===undefined){v=new Date(date+'T12:00:00').toLocaleDateString('en-US',options);if(FMT.size>5000)FMT.clear();FMT.set(k,v);}return v;};
 const shortDate=date=>fmt(date,{month:'short',day:'numeric'});
 // Slot and day names in messages and labels: "Wed lunch" in the week on screen, dated outside it.
 const where=id=>slotName(id,state.week),dayWord=date=>dayName(date,state.week);
@@ -100,10 +103,11 @@ const matchesMeal=(recipe,terms)=>matchesQuery(recipe,terms,{prices:state.prices
 // Tone adds a small aria-hidden mascot; the message itself always lives in .toast-text.
 const toast=(message,tone='',action=null)=>{const t=$('#toast'),text=document.createElement('span');t.dataset.tone=tone;t.innerHTML=tone==='success'?rat('cheer','toast-rat'):tone==='error'?rat('worry','toast-rat'):'';text.className='toast-text';text.textContent=message;t.append(text);
   // An optional one-tap follow-up (e.g. Undo) lives inside the toast and keeps it up a little longer.
-  if(action){const b=document.createElement('button');b.type='button';b.className='toast-action';b.dataset.action=action.action;b.textContent=action.label;t.append(b);}t.classList.toggle('has-action',!!action);if(t.showPopover&&document.querySelector('dialog[open]')){try{t.hidePopover();t.showPopover();}catch{}}t.classList.add('visible');duck(t);setTimeout(()=>duck(t),260);clearTimeout(toast.timer);toast.timer=setTimeout(()=>{t.classList.remove('visible');duck(t);},action?9000:4500);};
+  const actions=Array.isArray(action)?action:action?[action]:[];
+  for(const [i,a] of actions.entries()){const b=document.createElement('button');b.type='button';b.className=i?'toast-alt':'toast-action';b.dataset.action=a.action;if(a.id)b.dataset.id=a.id;b.textContent=a.label;t.append(b);}t.classList.toggle('has-action',!!actions.length);if(t.showPopover&&document.querySelector('dialog[open]')){try{t.hidePopover();t.showPopover();}catch{}}t.classList.add('visible');duck(t);setTimeout(()=>duck(t),260);clearTimeout(toast.timer);toast.timer=setTimeout(()=>{t.classList.remove('visible');duck(t);},actions.length?9000:4500);};
 function save() {try {localStorage.setItem(STORE,JSON.stringify(state));} catch {toast('Browser storage is unavailable. Export your plan to keep it.');}}
 // Every committed change is one undo step. Moves offer Undo right in their toast.
-function commit(next,message,{undo=false}={}) {try {next=validateState(next);} catch(e) {toast(e.message,'error');return false;} ui.history.push(structuredClone(state));if(ui.history.length>30)ui.history.shift();state=next;ui.isExample=false;save();render();if(message)toast(message,'success',undo?{action:'undo',label:'Undo'}:null);return true;}
+function commit(next,message,{undo=false,more=[],strings=null}={}) {try {next=validateState(next);} catch(e) {toast(e.message,'error');return false;} ui.history.push(structuredClone(state));if(ui.history.length>30)ui.history.shift();state=next;ui.isExample=false;if(strings)ui.strAnimate={ids:new Set(strings),until:performance.now()+700};save();render();if(message)toast(message,'success',undo?[{action:'undo',label:'Undo'},...more]:null);return true;}
 function mutate(fn,message) {const next=structuredClone(state);fn(next);return commit(next,message);}
 // Changing the week on screen is not a plan change: it saves, but adds no undo step.
 function showWeek(week) {state={...state,week};save();render();}
@@ -136,22 +140,31 @@ function filters() {return `${ui.ingredient?`<div class="ingredient-search-note"
   <div class="kind-tabs" aria-label="Meal type">${[['all','All'],['main','Mains'],['breakfast','Breakfast'],['snack','Snacks']].map(([v,l])=>`<button data-action="kind" data-id="${v}" class="${ui.kind===v?'active':''}" aria-pressed="${ui.kind===v}">${l}</button>`).join('')}</div>
   <div class="filter-chips">${[['cheap','≤ $3 / portion'],['quick','≤ 30 min total'],['onepot','One pot'],['dump','Dump dinners'],['veg','Veg-forward'],['favorites','♥ Favorites'],['easy',`≤ ${LOW_CLEANUP_LIMIT} to wash`]].map(([v,l])=>`<button class="chip ${ui[v]?'selected':''}" aria-pressed="${ui[v]}" data-action="filter" data-id="${v}">${l}</button>`).join('')}</div><details class="avoid-filter more-filters" ${state.avoid||ui.method!=='all'||ui.protein!=='all'||ui.moreFilters?'open':''}><summary>More filters${state.avoid||ui.method!=='all'||ui.protein!=='all'?' · active':''}</summary><div class="filter-selects"><select id="method-filter" aria-label="Cooking method"><option value="all">Every cooking method</option>${Object.entries(METHOD_NAMES).map(([v,l])=>`<option value="${v}" ${ui.method===v?'selected':''}>${l}</option>`).join('')}</select><select id="protein-filter" aria-label="Protein"><option value="all">All proteins</option>${[...new Set(RECIPES.map(r=>r.protein))].sort().map(v=>`<option ${ui.protein===v?'selected':''}>${v}</option>`).join('')}</select></div><label>Ingredients to skip<input id="avoid-ingredients" placeholder="mushrooms, shrimp" maxlength="300" value="${esc(state.avoid)}"></label><p class="field-help">Comma-separated ingredients. Saved for search and suggestions. Check packaged-food labels for allergens.</p></details>${ui.veg||parseQuery(ui.q).vegetables?'<p class="search-help">Veg-forward = about 3½ oz or more non-starchy vegetables per portion; amounts are estimates.</p>':''}${ui.easy||Number.isFinite(parseQuery(ui.q).maxCleanup)?`<p class="search-help">Up to ${LOW_CLEANUP_LIMIT} pieces, including prep, measuring tools and one place setting.</p>`:''}${ui.ingredient||ui.q||ui.kind!=='all'||ui.method!=='all'||ui.protein!=='all'||['cheap','quick','easy','onepot','dump','veg','favorites'].some(k=>ui[k])?'<button class="text-button" data-action="reset-filters">Clear search & filters</button>':''}`;}
 function library(large=false) {const list=mealList();return `<section class="library ${large?'expanded':''} ${ui.showLibrary?'':'collapsed'}" aria-label="Meal library"><div class="library-heading"><div><span class="eyebrow">A LITTLE INSPIRATION</span><h2>Find your next favorite<span class="count">${RECIPES.length}</span></h2></div>${large?'':'<button class="library-collapse icon-button" data-action="toggle-library" aria-label="Collapse meal library">−</button>'}</div>${filters()}<div class="library-style">${styleChip('library')}</div><div class="library-results"><span>${count(list.length,'recipe')} <span class="muted">· costs estimated</span></span><select id="sort-filter" aria-label="Sort meals">${[['featured','Featured'],['cost','Lowest cost'],['time','Least effort'],['cleanup','Least cleanup']].map(([v,l])=>`<option value="${v}" ${ui.sort===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="library-scroll ${large?'meal-grid':''}">${list.map(mealCard).join('')||`<div class="empty-search">${ratLive('search','empty-rat')}${deco('sparkle','empty-spark s1 anim-twinkle')}${deco('sparkle','empty-spark s2 anim-twinkle')}<span>No meals match these filters.</span><button data-action="reset-filters" class="text-button">Reset filters</button></div>`}</div><p class="library-foot">${rat('sit','foot-rat')}Drag a meal onto your week, or open its details to add it.<br>Every recipe includes steps and cookware.</p></section>`;}
-// The pin marks a meal she moved. Its × puts the meal back where it was placed automatically.
-function pinButton(b,cell) {
-  const r=recipeById[b.recipeId],spot=originalSpot(state,b.id);
-  // Placed by hand in an older save: nowhere to go back to, so the pin is only a marker.
-  if(!spot)return `<span class="pin-mark" role="img" aria-label="Moved by you" title="Moved by you">${uiIcon('pin','pin-on')}</span><span class="visually-hidden"> · moved by you</span>`;
-  return `<button class="pin-button" data-action="unpin" data-id="${b.id}" data-slot="${cell.id}" aria-label="Put ${esc(r.title)} back to ${esc(where(spot))}" title="Moved by you · put back">${uiIcon('pin','pin-on')}${uiIcon('unpin','pin-off')}</button><span class="visually-hidden"> · moved by you</span>`;
-}
-// The cooking card: the batch's first meal on the day it is cooked wears a tiny chef rat.
-const cookingSlot=(b,result)=>Object.values(result.cells).find(c=>c.chosen===b.id&&dayOf(c.id)===preparationDate(b))?.id;
+// Lock in: a small flat padlock (on the knot, the batch menu, batch details and Your batches).
+const LOCK_SVG='<svg class="lock-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="lock-shackle" d="M8 11V8.2a4 4 0 0 1 8 0V11"/><rect class="lock-body" x="5" y="10.5" width="14" height="10" rx="2.6"/><circle class="lock-hole" cx="12" cy="15.5" r="1.5"/></svg>';
+// A card's state: fresh (quiet), mushy (after enjoy-by, fine to cook day + 4) or past fridge-safe
+// (day 5 or later: a red band; USDA says cooked leftovers keep 3–4 days). Shown, never enforced.
+const FOOD_WORD={main:'dinner',breakfast:'breakfast',snack:'snack'};
+const slotWord=id=>typeOf(id).startsWith('snack')?'snack time':typeOf(id);
+const typeNote=(b,id)=>fitsType(b,id)?'':`${FOOD_WORD[recipeById[b.recipeId].kind]} at ${slotWord(id)}`;
+const lateWords=(b,id)=>{const f=freshness(b,id);return f==='mushy'?'mushy':f==='unsafe'?`past fridge-safe (day ${daysAfterCooking(b,id)})`:'';};
 function portionCard(b,cell,result) {
-  const r=recipeById[b.recipeId],prep=preparationDate(b),day=dayOf(cell.id),due=day===b.useBy,cooking=cookingSlot(b,result)===cell.id;
+  const r=recipeById[b.recipeId],prep=preparationDate(b),day=dayOf(cell.id),due=day===b.useBy,n=batchMeals(state,b.id).indexOf(cell.id)+1,first=n===1,cooking=first&&day===prep;
+  // Snacks hidden and the batch starts on a snack: its first visible card this week carries the knot and
+  // the chef rat, with a small "starts with a snack" note (Show snacks shows that meal).
+  const model=stringOf(b.id),startsHidden=!first&&model?.anchor===cell.id&&model.hiddenStart,cook=first||startsHidden;
   const made=prep<day?(b.prepAhead&&!b.prepDate&&b.startSlot===cell.id?'Prep night before':`Cooked ${fmt(prep,{weekday:'short'})}`):cooking?'Make batch':'Made today';
-  // Past its enjoy-by but still fine (up to 3 days after cooking): a small "softer" tag where "Last day" goes.
-  const tag=freshness(b,cell.id)==='softer'?'<span class="soft-tag" title="A little past its best: still fine, maybe less crisp">softer</span>'
-    :`<span class="use-by ${due?'due':''}">${due?(day===localDate(new Date())?'Eat today':'Last day'):`Enjoy by ${fmt(b.useBy,{weekday:'short'})}`}</span>`;
-  return `<article class="portion ${cooking?'is-cooking':''} ${cell.manual?'is-pinned':''}" style="${colors(r)}" draggable="true" data-batch="${b.id}" data-from="${cell.id}"><div class="portion-media">${media(r)}${cooking?`<span class="chef-sticker" title="Cook the batch for this meal">${rat('chef')}</span>`:''}<button class="drag-handle" data-action="move" data-id="${b.id}" data-from="${cell.id}" aria-label="Move ${esc(r.title)} from ${esc(where(cell.id))}" title="Move this meal">${uiIcon('drag')}</button>${cell.manual?pinButton(b,cell):''}<div class="portion-label"><button class="portion-name" data-action="batch" data-id="${b.id}" title="${esc(r.title)}">${esc(r.title)}</button><span class="portion-foot"><span>${made}${cooking?'<span class="visually-hidden"> · cook the batch for this meal</span>':''}</span>${tag}</span></div></div></article>`;
+  const fresh=freshness(b,cell.id),note=typeNote(b,cell.id);
+  // Past its enjoy-by: a small "~ mushy" tag where "Last day" goes. Past fridge-safe: a red band across the top.
+  const tag=fresh==='mushy'?'<span class="mushy-tag" title="After its enjoy-by: still fridge-safe, maybe a little mushy">~ mushy</span>'
+    :fresh==='unsafe'?'':`<span class="use-by ${due?'due':''}">${due?(day===localDate(new Date())?'Eat today':'Last day'):`Enjoy by ${fmt(b.useBy,{weekday:'short'})}`}</span>`;
+  const band=fresh==='unsafe'?`<span class="unsafe-band"><b aria-hidden="true">!</b>Past fridge-safe · day ${daysAfterCooking(b,cell.id)}</span>`:'';
+  // Portion chip: which meal of the batch this is; the cook meal's chip wears the chef rat.
+  const cookFor=startsHidden?`Cook the batch for its first meal, ${where(model.hiddenStart)} (snacks are hidden) · `:first?'Cook the batch for this meal · ':'';
+  const chip=`<span class="portion-chip ${cook?'is-cook':''}" title="${esc(cookFor)}Meal ${n} of ${b.portions}">${cook?rat('chef','chip-rat'):''}<b aria-hidden="true">${n}/${b.portions}</b><span class="visually-hidden">Meal ${n} of ${b.portions}${first?', cook the batch for this meal':startsHidden?`, the batch starts with ${esc(where(model.hiddenStart))}`:''}.</span></span>`;
+  const start=startsHidden?`<span class="start-note" title="Its first meal is ${esc(where(model.hiddenStart))}. Turn on Show snacks to see it.">starts with a snack</span>`:'';
+  const color=model?.color;
+  return `<article class="portion ${first?'is-cooking':''} ${fresh==='unsafe'?'is-unsafe':''} ${fresh==='mushy'?'is-mushy':''}" style="${colors(r)}${color?`;--c:${color}`:''}" draggable="true" data-batch="${b.id}" data-from="${cell.id}"><div class="portion-media">${media(r)}${band}${chip}<button class="drag-handle" data-action="move" data-id="${b.id}" data-from="${cell.id}" aria-label="Move ${esc(r.title)} from ${esc(where(cell.id))}" title="Move this meal">${uiIcon('drag')}</button><div class="portion-label"><button class="portion-name" data-action="batch" data-id="${b.id}" title="${esc(r.title)}">${esc(r.title)}</button><span class="portion-foot"><span>${made}</span>${tag}${start}${note?`<span class="type-note">${note}</span>`:''}</span></div></div></article>`;
 }
 // A skipped slot: a little rat off with a takeout bag. Details are optional; tap to add them.
 function skipCard(id,skip) {
@@ -160,8 +173,10 @@ function skipCard(id,skip) {
 }
 function calendarCell(id,result,byId) {
   const cell=result.cells[id],type=typeOf(id),snack=type.startsWith('snack'),chosen=byId[cell?.chosen],skip=cell?.skip;
-  const what=chosen?esc(recipeById[chosen.recipeId].title):skip?`Skipped${skip.label?`: ${esc(skip.label)}`:''}`:'Empty';
-  return `<div class="meal-slot ${snack?'snack-slot':''} ${ui.pick?'accepting':''}" data-slot="${id}" tabindex="0" role="group" aria-label="${esc(SLOT_LABELS[type])}, ${fmt(dayOf(id),{weekday:'long',month:'long',day:'numeric'})}. ${what}. ${ui.pick?'Press Enter to place selected food.':chosen?'Delete skips this meal.':''}"><div class="slot-label">${SLOT_LABELS[type]}${chosen||skip?'<span class="filled-dot"></span>':''}</div>${chosen?portionCard(chosen,cell,result):skip?skipCard(id,skip):`<button class="empty-slot" data-action="slot" data-slot="${id}" aria-label="Choose a meal for ${esc(SLOT_LABELS[type])} ${shortDate(dayOf(id))}, or skip it"><span>＋</span><span>${ui.pick?'Place here':snack?'Optional':'Add a meal'}</span>${snack?'':rat('peek','slot-rat')}</button>`}</div>`;
+  const late=chosen?lateWords(chosen,id):'',note=chosen?typeNote(chosen,id):'';
+  const what=chosen?`${esc(recipeById[chosen.recipeId].title)}${late?`, ${late}`:''}${note?`, ${note}`:''}`:skip?`Skipped${skip.label?`: ${esc(skip.label)}`:''}`:'Empty';
+  // "Delete skips this meal" is a keyboard hint; phones have no Delete key, so they don't hear it.
+  return `<div class="meal-slot ${snack?'snack-slot':''} ${ui.pick?'accepting':''}" data-slot="${id}" tabindex="0" role="group" aria-label="${esc(SLOT_LABELS[type])}, ${fmt(dayOf(id),{weekday:'long',month:'long',day:'numeric'})}. ${what}. ${ui.pick?'Press Enter to place selected food.':chosen&&!coarse()?'Delete skips this meal.':''}"><div class="slot-label">${SLOT_LABELS[type]}${chosen||skip?'<span class="filled-dot"></span>':''}</div>${chosen?portionCard(chosen,cell,result):skip?skipCard(id,skip):`<button class="empty-slot" data-action="slot" data-slot="${id}" aria-label="Choose a meal for ${esc(SLOT_LABELS[type])} ${shortDate(dayOf(id))}, or skip it"><span>＋</span><span>${ui.pick?'Place here':snack?'Optional':'Add a meal'}</span>${snack?'':rat('peek','slot-rat')}</button>`}</div>`;
 }
 // Cook-day marker: a little pot and a count on the day header (and a pot on the phone's day chips).
 // It counts every batch cooked that day: for a meal that day, the night before a packed meal, or on a prep day.
@@ -196,6 +211,13 @@ function daySummary(date,result) {
   const shelf=`<button class="shelf ${bare?'is-bare':''}" data-action="day-close" data-id="${date}" aria-expanded="${open}" aria-controls="dc-panel-${date}" aria-label="${esc(label)}">
     <span class="dc-items" aria-hidden="true">${all.filter(x=>keep.has(x)).map(token).join('')}</span><span class="dc-plank" aria-hidden="true"></span>
     <span class="dc-cap">${day.portions?`<span class="dc-portions"><b>${day.portions}</b> ${pluralize(day.portions,'portion')} ready</span>`:'<span class="visually-hidden">0 portions ready</span>'}${flags.length?`<span class="dc-use">${dot(tone(flags[0].useBy))}<span>Use ${names}${flags.length>named?` <span class="dc-more">+${flags.length-named}</span>`:''}</span></span>`:''}</span></button>`;
+  // The open panel's contents are built only for the open day (closed ones are empty until opened).
+  const panel=`<section class="day-close-body" id="dc-panel-${date}" role="dialog" aria-labelledby="dc-title-${date}" tabindex="-1" ${open?'':'hidden'}>${open?dayPanel(date,day,tone):''}</section>`;
+  return `<div class="day-close ${open?'is-open':''} ${days().indexOf(date)>=4?'is-flip':''}" data-day-close="${date}">${shelf}<div class="dc-scrim" data-action="day-close-x" ${open?'':'hidden'}></div>${panel}</div>`;
+}
+function dayPanel(date,day,tone) {
+  const long=fmt(date,{weekday:'long'}),batchOf=id=>state.batches.find(b=>b.id===id),qty=i=>stockQuantity(i.remaining,i.unit),wd=d=>fmt(d,{weekday:'short'});
+  const tag=t=>`<span class="dc-tag is-${t}">${DC_TAG[t]}</span>`;
   // Open: every food appears once.
   const soonIds=new Set(day.expiries.filter(e=>e.kind==='ingredient').map(e=>e.id)),dueBatches=new Set(day.expiries.filter(e=>e.kind==='batch').map(e=>e.id));
   const score=i=>(i.events.some(e=>e.date===date)?2:0)+(['Meat & seafood','Produce'].includes(aisleFor(i.id))?1:0);
@@ -205,25 +227,30 @@ function daySummary(date,result) {
     ?`<button class="day-close-date dc-row is-${t}" data-action="batch" data-id="${e.id}"><span class="dc-tok is-photo">${media(recipeById[batchOf(e.id).recipeId],'dc-thumb')}</span><span class="dc-row-main"><b class="dc-row-name">${esc(e.name)}</b><small>${count(e.remaining,'portion')} · <span class="dc-when">${t==='past'?when:`eat by ${wd(e.useBy)}`}</span></small></span>${tag(t)}</button>`
     :`<button class="day-close-date dc-row is-${t}" data-action="ingredient-date" data-id="${e.id}" aria-label="${esc(e.name)}, ${qty(e)} left, use by ${shortDate(e.useBy)}"><span class="dc-tok">${irat(e.id)}</span><span class="dc-row-main"><b class="dc-row-name">${esc(e.name)}</b><small>${e.remaining>0?qty(e):'Used up today'} · <span class="dc-when">${when}</span></small></span>${tag(t)}</button>`;};
   const sub=[day.portions?`${count(day.portions,'portion')} ready`:'',day.expiries.length?`${count(day.expiries.length,'thing')} to use up`:''].filter(Boolean).join(' · ')||(day.ingredients.length?`${count(day.ingredients.length,'ingredient')} still in the kitchen`:'Nothing left over');
-  const panel=`<section class="day-close-body" id="dc-panel-${date}" role="dialog" aria-labelledby="dc-title-${date}" tabindex="-1" ${open?'':'hidden'}>
-    <header class="dc-head"><span class="dc-day" aria-hidden="true"><span>${wd(date)}</span><b>${fmt(date,{day:'numeric'})}</b></span><div class="dc-title"><h3 id="dc-title-${date}">End of ${long}</h3><p>${sub}</p></div><button class="icon-button dc-x" data-action="day-close-x" aria-label="Close end of ${long}">✕</button></header>
+  return `<header class="dc-head"><span class="dc-day" aria-hidden="true"><span>${wd(date)}</span><b>${fmt(date,{day:'numeric'})}</b></span><div class="dc-title"><h3 id="dc-title-${date}">End of ${long}</h3><p>${sub}</p></div><button class="icon-button dc-x" data-action="day-close-x" aria-label="Close end of ${long}">✕</button></header>
     <div class="dc-body">${day.expiries.length?`<section class="dc-sec"><h4>${worry?ratLive('worry','dc-worry-rat'):''}Use these first</h4>${day.expiries.map(useRow).join('')}<p class="dc-hint">Tap one to change its date or mark it used.</p></section>`:''}
     ${ready.length?`<section class="dc-sec"><h4>${dueBatches.size?'Also ready to eat':'Ready to eat'}</h4><div class="dc-meals">${ready.map(b=>`<button class="day-close-meal dc-row dc-meal" data-action="batch" data-id="${b.id}">${media(recipeById[b.recipeId],'dc-meal-img')}<span class="dc-meal-label"><b>${esc(b.title)}</b><small>${count(b.remaining,'portion')} · by ${wd(b.useBy)}</small></span></button>`).join('')}</div>${ready.some(b=>dayOf(b.startSlot)>addDays(state.week,6))?'<p class="dc-hint">Prep for next week uses next week’s groceries.</p>':''}</section>`:''}
     ${rest.length?`<section class="dc-sec"><h4>Still in the kitchen <span class="dc-count">${rest.length}</span></h4><div class="dc-chips">${rest.map((i,n)=>`<button class="day-close-ingredient dc-chip ${n>=DC_KITCHEN?'is-extra':''}" data-action="ingredient-date" data-id="${i.id}" aria-label="${esc(i.name)}, ${qty(i)} left${i.useBy?`, use by ${shortDate(i.useBy)}`:', add package date'}">${irat(i.id)}<span>${esc(i.name)}</span><b>${qty(i)}</b></button>`).join('')}</div><p class="dc-hint">Tap one to add or change its use-by date.</p></section>`:''}
     ${!day.expiries.length&&!ready.length&&!rest.length?`<p class="dc-calm">${ratLive('sleep','dc-calm-rat')}<span>Nothing left over and nothing about to go off.</span></p>`:''}
-    </div>${day.ingredients.length?`<footer class="dc-foot"><button class="text-button dc-all" data-action="day-stock" data-id="${date}">All ${count(day.ingredients.length,'ingredient')} in Food left ↗</button></footer>`:''}</section>`;
-  return `<div class="day-close ${open?'is-open':''} ${days().indexOf(date)>=4?'is-flip':''}" data-day-close="${date}">${shelf}<div class="dc-scrim" data-action="day-close-x" ${open?'':'hidden'}></div>${panel}</div>`;
+    </div>${day.ingredients.length?`<footer class="dc-foot"><button class="text-button dc-all" data-action="day-stock" data-id="${date}">All ${count(day.ingredients.length,'ingredient')} in Food left ↗</button></footer>`:''}`;
+}
+// Fill a day's panel when it opens (a day kept from an earlier render may hold older contents).
+function fillDayPanel(el) {
+  const panel=el?.querySelector('.day-close-body');if(!panel)return;
+  const date=el.dataset.dayClose,day=endOfDay(state,date,schedule(state));
+  panel.innerHTML=dayPanel(date,day,useBy=>useBy<date?'past':useBy===date?'now':'soon');
 }
 const isPhone=()=>matchMedia('(max-width:760px)').matches;
 // Touch screens have no Escape key: point at the banner's ✕ instead.
-const cancelHint=()=>matchMedia('(pointer:coarse)').matches?'✕ cancels.':'Escape cancels.';
+const coarse=()=>matchMedia('(pointer:coarse)').matches;
+const cancelHint=()=>coarse()?'✕ cancels.':'Escape cancels.';
 // One day's detail is open at a time; the choice survives re-renders. Opening moves focus in, closing returns it.
 function setDayOpen(date,{focus=false}={}) {
   const prev=ui.dayOpen;ui.dayOpen=date||null;
   document.querySelectorAll('.day-close').forEach(el=>{const on=el.dataset.dayClose===ui.dayOpen;el.classList.toggle('is-open',on);el.querySelector('.shelf')?.setAttribute('aria-expanded',on);
     for(const part of el.querySelectorAll('.day-close-body,.dc-scrim'))part.hidden=!on;});
   const wrap=$('.day-close.is-open');
-  if(wrap){placeDayPanel(true);const panel=wrap.querySelector('.day-close-body');
+  if(wrap){if(prev!==ui.dayOpen)fillDayPanel(wrap);placeDayPanel(true);const panel=wrap.querySelector('.day-close-body');
     if(!reduceMotion()){panel.classList.remove('dc-enter');void panel.offsetWidth;panel.classList.add('dc-enter');panel.addEventListener('animationend',()=>panel.classList.remove('dc-enter'),{once:true});}
     if(focus)panel.focus({preventScroll:true});}
   else if(focus&&prev)document.querySelector(`.day-close[data-day-close="${prev}"] .shelf`)?.focus({preventScroll:true});
@@ -243,10 +270,24 @@ function placeDayPanel(reveal=false) {
   panel.style.setProperty('--px',`${Math.round(Math.max(28,Math.min(r.width-28,shelf.left+shelf.width/2-r.left-dx)))}px`);
   if(reveal){const top=panel.getBoundingClientRect().top,gap=top<10?top-10:shelf.bottom>innerHeight-8?shelf.bottom-innerHeight+12:0;if(gap)scrollBy({top:gap,behavior:reduceMotion()?'instant':'smooth'});}
 }
-addEventListener('resize',()=>placeDayPanel(),{passive:true});
-document.addEventListener('scroll',e=>{if(ui.dayOpen&&e.target.classList?.contains('week-scroll'))placeDayPanel();},{capture:true,passive:true});
+addEventListener('resize',()=>{placeDayPanel();placeKnotMenu();},{passive:true});
+document.addEventListener('scroll',e=>{if(!e.target.classList?.contains('week-scroll'))return;if(ui.dayOpen)placeDayPanel();if(ui.knotMenu)placeKnotMenu();},{capture:true,passive:true});
 // A desktop popover closes when you click elsewhere (the phone sheet has its own scrim).
-document.addEventListener('pointerdown',e=>{if(ui.dayOpen&&!isPhone()&&!e.target.closest('.day-close.is-open,dialog,#toast,.fetch-layer'))setDayOpen(null);});
+document.addEventListener('pointerdown',e=>{if(ui.dayOpen&&!isPhone()&&!e.target.closest('.day-close.is-open,dialog,#toast,.fetch-layer'))setDayOpen(null);
+  if(ui.knotMenu&&!e.target.closest('.knot-menu,.knot,#toast,dialog'))closeKnotMenu({focus:false});});
+// Lift a string: hover a card or its knot with a mouse, or focus into a card with the keyboard.
+let strHoverTimer=0;
+document.addEventListener('pointerover',e=>{
+  if(e.pointerType!=='mouse'||ui.knotMenu||document.body.classList.contains('knot-dragging'))return;
+  const card=e.target.closest?.('.week-grid .portion[data-batch],.week-grid .knot');clearTimeout(strHoverTimer);
+  if(card)focusString(card.dataset.batch||card.dataset.id);
+  else if(ui.strFocus)strHoverTimer=setTimeout(()=>{if(!ui.knotMenu)focusString(null);},160);
+});
+document.addEventListener('focusin',e=>{
+  if(ui.knotMenu)return;
+  const card=e.target.closest?.('.week-grid .portion[data-batch],.week-grid .knot');
+  if(card)focusString(card.dataset.batch||card.dataset.id);else if(ui.strFocus&&!e.target.closest?.('.week-grid'))focusString(null);
+});
 // "What's next": today's cooking, tomorrow's packed lunch and the shopping run, each one tap away.
 function nextUp() {
   const now=new Date(),today=localDate(now),tomorrow=addDays(today,1),current={...state,week:monday(today)};
@@ -274,12 +315,22 @@ function homeTop() {
     <div class="plan-card"><span class="plan-art" aria-hidden="true">${rat('love','plan-rat')}</span><button class="primary plan-cta" data-action="auto-plan">${deco('sparkle','cta-spark')}<span>Plan my week</span></button><p class="plan-card-note">Cheap, easy meals · groceries listed · undo anytime</p>${styleChip('home')}<button class="text-button plan-fine" data-action="suggest-plan">Preview & fine-tune</button></div></section>`;
 }
 const DEFAULT_PLAN_OPTIONS={budget:100,maxCost:3,maxActive:20,style:'simple',meals:['lunch','dinner']};
+// What an automatic plan did to the batches already there, exactly: which unlocked ones it replaced (by name),
+// and what it kept (locked ones; unlocked ones already under way or serving meals it isn't planning).
+function planSummary(p) {
+  const title=b=>recipeById[b.recipeId].title,k=p.kept||{locked:[],started:[],other:[]},parts=[];
+  if(p.replaced.length)parts.push(`Replaced ${count(p.replaced.length,'unlocked batch','unlocked batches')}: ${p.replaced.map(title).join(', ')}.`);
+  if(k.locked.length)parts.push(`Kept ${count(k.locked.length,'locked batch','locked batches')}.`);
+  if(k.started.length)parts.push(`Kept ${count(k.started.length,'unlocked batch','unlocked batches')} already under way.`);
+  if(k.other.length)parts.push(`Kept ${count(k.other.length,'unlocked batch','unlocked batches')} for meals it isn’t planning.`);
+  return parts.length?' '+parts.join(' '):'';
+}
 // One tap: plan with her saved (or default) settings, apply it, and offer Undo. The preview dialog stays one tap away.
 function autoPlan() {
   const proposal=generatePlan({...(ui.planOptions||DEFAULT_PLAN_OPTIONS),matchIngredients:ui.matchIngredients});
   if(!proposal.added.length){toast(proposal.unfilled?'Nothing new fits right now. Try Preview & fine-tune.':'Your week is already full.');return;}
   ui.view='week';ui.plannerView='calendar';
-  if(commit(proposal.state)){toast(`Planned! ${count(proposal.added.length,'easy batch','easy batches')}, groceries listed.${styleNote()}`,'success',{action:'undo',label:'Undo'});fx('confetti');hop($('.next-rat'));}
+  if(commit(proposal.state)){toast(`Planned! ${count(proposal.added.length,'easy batch','easy batches')}, groceries listed.${planSummary(proposal)}${styleNote()}`,'success',{action:'undo',label:'Undo'});fx('confetti');hop($('.next-rat'));}
 }
 function ingredientDateDialog(id) {
   const ingredient=INGREDIENTS[id];if(!ingredient)return;
@@ -299,13 +350,144 @@ function fridgeList(extras,result) {
   const today=localDate(new Date());
   return `<section class="fridge" aria-label="Extras in the fridge"><h4>In the fridge</h4>${extras.map(b=>{
     const r=recipeById[b.recipeId],left=result.remaining[b.id],keeps=keepsUntil(b),cooked=isCooked(b);
-    const until=today<=b.useBy?`good until ${dayWord(b.useBy)}`:today<=keeps?`keeps until ${dayWord(keeps)}`:'too old now';
-    return `<div class="extra-row" style="${colors(r)}" draggable="true" data-batch="${b.id}" data-extra="${b.id}"><span class="extra-thumb">${media(r)}</span><span class="extra-text"><strong>${esc(r.title)}</strong><small>${count(left,'extra')} in the fridge · ${until}</small></span><span class="extra-actions">${today<=keeps?`<button type="button" class="secondary" data-action="put-back-extra" data-id="${b.id}">Put back</button><button type="button" class="text-button drag-handle extra-place" data-action="pick-extra" data-id="${b.id}" aria-label="Choose a slot for ${esc(r.title)}" title="Tap, then tap a slot (a meal there waits in the fridge instead)">Choose a slot</button>`:''}<button type="button" class="text-button" data-action="toss-extra" data-id="${b.id}">Toss</button>${cooked||!canCookSmaller(b)?'':`<button type="button" class="text-button" data-action="cook-smaller" data-id="${b.id}" title="Cook one portion less: fewer groceries">Cook smaller</button>`}</span></div>`;
+    const until=today<=b.useBy?`good until ${dayWord(b.useBy)}`:today<=keeps?`mushy, fridge-safe until ${dayWord(keeps)}`:'past fridge-safe';
+    return `<div class="extra-row" style="${colors(r)}" draggable="true" data-batch="${b.id}" data-extra="${b.id}"><span class="extra-thumb">${media(r)}</span><span class="extra-text"><strong>${esc(r.title)}</strong><small>${count(left,'extra')} in the fridge · ${until}</small></span><span class="extra-actions">${today<=keeps?`<button type="button" class="secondary" data-action="put-back-extra" data-id="${b.id}">Put back</button>`:''}<button type="button" class="text-button drag-handle extra-place" data-action="pick-extra" data-id="${b.id}" aria-label="Choose a slot for ${esc(r.title)}" title="Tap, then tap a slot (a meal there waits in the fridge instead)">Choose a slot</button><button type="button" class="text-button" data-action="toss-extra" data-id="${b.id}">Toss</button>${cooked||!canCookSmaller(b)?'':`<button type="button" class="text-button" data-action="cook-smaller" data-id="${b.id}" title="Cook one portion less: fewer groceries">Cook smaller</button>`}</span></div>`;
   }).join('')}</section>`;
+}
+// ------------------------------------------------ The yarn string ------------------------------------------------
+// Every batch on the week gets a candy-coloured string through its meals (colours go in calendar order,
+// so neighbours differ). Its knot, on the first (cook) meal, is the whole-batch handle: tap for the
+// batch menu, drag to move every meal. Hover, focus or tap a card to lift its string.
+const TIDY_ICON='<svg class="tidy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12c3-6 6 6 9 0s6 6 9 0"/></svg>';
+const STRING_COLORS=6;
+// The model is read by every card (its colour), the strings and the knot menu: made once per plan and day.
+let strMemo={};
+function stringModel() {
+  const key=localDate();if(strMemo.state===state&&strMemo.key===key&&strMemo.snacks===state.showSnacks)return strMemo.model;
+  const model=buildStringModel();strMemo={state,key,snacks:state.showSnacks,model,byId:new Map(model.map(x=>[x.id,x]))};return model;
+}
+const stringOf=id=>{stringModel();return strMemo.byId.get(id);};
+function buildStringModel() {
+  const end=addDays(state.week,6),inWeek=id=>dayOf(id)>=state.week&&dayOf(id)<=end,shown=id=>inWeek(id)&&(state.showSnacks||!typeOf(id).startsWith('snack'));
+  const list=state.batches.map(b=>({b,meals:batchMeals(state,b.id)})).filter(x=>x.meals.some(inWeek));
+  const firstIn=x=>x.meals.find(inWeek);
+  list.sort((a,b)=>firstIn(a).localeCompare(firstIn(b))||a.b.id.localeCompare(b.b.id));
+  return list.map(({b,meals},i)=>{
+    const cook=preparationDate(b),title=recipeById[b.recipeId].title;
+    // The knot sits on the first meal; when that is a snack this week and snacks are hidden, on the first meal shown.
+    const hidden=inWeek(meals[0])&&!shown(meals[0]),anchor=hidden?meals.find(shown)||null:meals[0];
+    return {id:b.id,color:`var(--s${i%STRING_COLORS})`,title:esc(title),first:meals[0],anchor,hiddenStart:hidden?meals[0]:null,locked:isLocked(b),
+      meals:Object.fromEntries(meals.filter(inWeek).map(id=>[id,{state:freshness(b,id),day:daysAfterCooking(b,id)}])),
+      before:meals.filter(id=>dayOf(id)<state.week).length,after:meals.filter(id=>dayOf(id)>end).length,
+      cookLabel:`${isCooked(b)?'Cooked':'Cooks'} ${dayWord(cook)}`,enjoyLabel:`Enjoy by ${dayWord(b.useBy)}`,
+      startLabel:hidden?`Starts with ${where(meals[0])} (snacks hidden)`:''};
+  });
+}
+function drawWeekStrings() {
+  const grid=$('.week-grid');if(!grid||!grid.offsetParent)return;
+  // A string that was just created or moved draws itself in; redraws in the next moment (hover) keep it drawing.
+  const fresh=ui.strAnimate&&performance.now()<ui.strAnimate.until;
+  drawStrings(grid,stringModel(),{focus:ui.strFocus,animate:fresh?ui.strAnimate.ids:new Set()});
+  if(!fresh)ui.strAnimate=null;
+  watchGrid(grid,drawWeekStrings);
+}
+if(typeof document!=='undefined')document.fonts?.ready?.then(()=>drawWeekStrings());
+// Focus a batch's string (hover, keyboard focus or a tap on a card); null clears it.
+function focusString(id) {
+  if(ui.strFocus===(id||null))return;
+  ui.strFocus=id||null;drawWeekStrings();
+}
+// The knot menu: the batch's dates, a plain warning, and the one-tap fixes (each one Undo).
+function lateMeals(b){return batchMeals(state,b.id).filter(id=>freshness(b,id)==='unsafe');}
+function straightenPreview(b) {
+  const r=straightenBatch(state,b.id),first=batchMeals(state,b.id)[0];
+  if(!r.changed)return {changed:false,text:'Already in a row. Nothing to do.'};
+  const moved=r.placed.filter(id=>!r.from.includes(id));
+  return {changed:true,text:`Back in a row from ${where(first)}${moved.length?`: ${moved.map(where).join(', ')}`:''}${r.fridged?` · ${count(r.fridged,'meal')} to the fridge`:''} · nothing else moves`};
+}
+function knotMenu(b,result) {
+  const r=recipeById[b.recipeId],cook=preparationDate(b),keeps=keepsUntil(b),meals=batchMeals(state,b.id),left=result.remaining[b.id]||0;
+  const end=addDays(state.week,6),away=meals.filter(id=>dayOf(id)<state.week||dayOf(id)>end).length,late=lateMeals(b),wd=d=>fmt(d,{weekday:'short'});
+  const mushyFrom=addDays(b.useBy,1),dates=[`<span class="km-d is-cook">${isCooked(b)?'Cooked':'Cooks'} ${wd(cook)}</span>`,`<span class="km-d is-best">Best by ${wd(b.useBy)}</span>`,
+    ...(mushyFrom<=keeps?[`<span class="km-d is-mushy">Mushy ${wd(mushyFrom)}${mushyFrom<keeps?`–${wd(keeps)}`:''}</span>`]:[]),`<span class="km-d is-unsafe">Not safe ${wd(addDays(keeps,1))}+</span>`].join('');
+  const sub=[count(meals.length,'meal'),left?`${count(left,'extra')} in the fridge`:'',away?`${away} in another week`:''].filter(Boolean).join(' · ');
+  const st=straightenPreview(b),chips=days().map(d=>`<button type="button" class="km-day ${d===cook?'is-on':''}" data-action="knot-cook" data-id="${b.id}" data-days="${dayGap(cook,d)}" aria-pressed="${d===cook}" aria-label="Cook on ${fmt(d,{weekday:'long',month:'long',day:'numeric'})}" ${d===cook?'disabled':''}>${wd(d)}</button>`).join('');
+  const weekChips=`${chips}</div><div class="km-weeks"><button type="button" class="km-day km-week" data-action="knot-cook" data-id="${b.id}" data-days="-7">‹ A week earlier</button><button type="button" class="km-day km-week" data-action="knot-cook" data-id="${b.id}" data-days="7">A week later ›</button>`;
+  return `<div class="knot-menu-wrap" data-knot-menu="${b.id}"><div class="km-scrim" data-action="knot-close"></div><section class="knot-menu" role="dialog" aria-labelledby="km-title" tabindex="-1" style="--c:${esc(stringOf(b.id)?.color||'var(--s0)')}">
+    <header class="km-head"><span class="km-thumb">${media(r)}</span><div><h3 id="km-title">${esc(r.title)}</h3><small>${sub}</small></div><button type="button" class="icon-button km-x" data-action="knot-close" aria-label="Close batch menu">✕</button></header>
+    <div class="km-dates" aria-label="Dates">${dates}</div>
+    ${late.length?`<p class="km-warn"><b aria-hidden="true">!</b><span>${late.map(id=>`${esc(where(id))} is ${daysAfterCooking(b,id)} days after cooking`).join('; ')}: past fridge-safe (USDA: 3–4 days).</span></p>`:''}
+    ${lockButton(b,'km')}
+    <button type="button" class="km-btn km-main" data-action="knot-straighten" data-id="${b.id}" ${st.changed?'':'aria-disabled="true"'}><i aria-hidden="true">${TIDY_ICON}</i><span>Straighten string<small>${esc(st.text)}</small></span></button>
+    <div class="km-group"><p class="km-btn km-label"><i aria-hidden="true">⇆</i><span>Cook it another day<small>Moves all ${count(meals.length,'meal')} with it · or drag the knot</small></span></p><div class="km-days" role="group" aria-label="Cook it another day">${weekChips}</div></div>
+    ${late.length?`<button type="button" class="km-btn" data-action="knot-fridge" data-id="${b.id}"><i aria-hidden="true">❄</i><span>Put the late meal${late.length>1?'s':''} in the fridge<small>${esc(late.map(where).join(', '))} ${late.length>1?'become extras':'becomes an extra'} · Put back or Toss later</small></span></button>`:''}
+    <footer class="km-foot"><button type="button" class="text-button" data-action="batch" data-id="${b.id}">Batch details ›</button><span>Every change: one tap Undo</span></footer></section></div>`;
+}
+// Lock in / Unlock: one tap, one Undo. Locked = Plan my week and Re-plan open meals keep this batch
+// (they never replace it); her own moves are never blocked. Knot menu (km) and batch details (dlg).
+function lockButton(b,where) {
+  const on=isLocked(b),sub=on?'Plan my week and Re-plan keep it · tap to unlock':'Plan my week or Re-plan may swap it for a new idea';
+  return where==='km'
+    ?`<button type="button" class="km-btn km-lock ${on?'is-locked':''}" data-action="lock" data-id="${b.id}" aria-pressed="${on}"><i aria-hidden="true">${LOCK_SVG}</i><span>${on?'Locked in':'Lock in'}<small>${sub}</small></span></button>`
+    :`<button type="button" class="secondary lock-toggle ${on?'is-locked':''}" data-action="lock" data-id="${b.id}" aria-pressed="${on}" title="${sub}">${LOCK_SVG}<span>${on?'Locked in':'Lock in'}</span></button>`;
+}
+function toggleLock(id,el) {
+  const b=state.batches.find(x=>x.id===id);if(!b)return;
+  const locked=!isLocked(b),r=setLocked(state,id,locked),title=titleOfBatch(id);
+  if(!commit(r.state,locked?`Locked in: Plan my week and Re-plan keep ${title}.`:`${title} unlocked: Plan my week or Re-plan may swap it for a new idea.`,{undo:true}))return;
+  // Batch details stays open: its button shows the new state.
+  const dlg=el?.closest('dialog');if(dlg){const nb=state.batches.find(x=>x.id===id);el.outerHTML=lockButton(nb,'dlg');dlg.querySelector(`[data-action="lock"][data-id="${CSS.escape(id)}"]`)?.focus({preventScroll:true});}
+  else document.querySelector(`.knot-menu [data-action="lock"]`)?.focus({preventScroll:true});
+}
+// Desktop: a popover beside the knot, kept inside the calendar panel. Phone: a bottom sheet (CSS).
+function placeKnotMenu() {
+  const wrap=$('.knot-menu-wrap'),menu=wrap?.querySelector('.knot-menu');if(!menu)return;
+  menu.style.removeProperty('left');menu.style.removeProperty('top');
+  if(isPhone())return;
+  const knot=document.getElementById(`knot-${wrap.dataset.knotMenu}`),panel=$('.calendar-panel');
+  if(!knot||!panel){menu.classList.add('is-floating');return;}
+  const k=knot.getBoundingClientRect(),p=panel.getBoundingClientRect(),w=menu.offsetWidth,h=menu.offsetHeight;
+  let left=k.right-p.left+12,flip=false;
+  if(left+w>p.width){left=k.left-p.left-w-12;flip=true;}
+  left=Math.max(0,left);
+  const top=Math.max(0,Math.min(k.top-p.top-44,p.height-h));
+  menu.classList.toggle('is-flip',flip);menu.style.left=`${Math.round(left)}px`;menu.style.top=`${Math.round(top)}px`;
+  menu.style.setProperty('--at',`${Math.round(k.top-p.top-top+k.height/2-9)}px`);
+}
+function openKnotMenu(id) {ui.knotMenu=id;ui.strFocus=id;render();$('.knot-menu')?.focus({preventScroll:true});$('.knot-menu [data-action="knot-straighten"]')?.focus({preventScroll:true});}
+// Closing only removes the menu (no re-render), so the tap that closed it still lands where it was aimed.
+function closeKnotMenu({focus=true}={}) {const id=ui.knotMenu;if(!id)return;ui.knotMenu=null;$('.knot-menu-wrap')?.remove();ui.strFocus=null;drawWeekStrings();if(focus)document.getElementById(`knot-${id}`)?.focus({preventScroll:true});}
+// What a whole-batch move says: where it cooks now, what waits in the fridge, what gave way.
+// Meals bumped by a whole-batch move, one name per batch: "Ravioli (Thu dinner, Fri lunch)", or "Ravioli ×2".
+function bumpedNames(list,{slots=true}={}) {
+  const by=new Map();for(const x of list||[]){if(!by.has(x.batchId))by.set(x.batchId,[]);by.get(x.batchId).push(x.slot);}
+  return [...by].map(([id,at])=>slots?`${titleOfBatch(id)} (${at.map(where).join(', ')})`:`${titleOfBatch(id)}${at.length>1?` ×${at.length}`:''}`).join(', ');
+}
+function slideMessage(title,before,r) {
+  const b=r.state.batches.find(x=>x.id===before.id),cook=preparationDate(b),n=(r.bumped||[]).length;
+  const gone=(r.skipsGone||[]).map(x=>where(x.slot));
+  return `${title} now cooks ${dayWord(cook)}.${n?` ${bumpedNames(r.bumped)} ${n>1?'wait':'waits'} in the fridge.`:''}${gone.length?` The skip on ${gone.join(', ')} is gone.`:''}${lateNote(r)}`;
+}
+function straighten(id) {
+  const r=straightenBatch(state,id);ui.knotMenu=null;
+  if(!r.changed){render();toast(`${titleOfBatch(id)} is already in a row.`);return;}
+  const moved=r.placed.filter(x=>!r.from.includes(x));
+  commit(r.state,`${titleOfBatch(id)} straightened${moved.length?`: now ${moved.map(where).join(', ')}`:''}.${r.fridged?` ${count(r.fridged,'meal')} ${r.fridged>1?'wait':'waits'} in the fridge.`:''} Nothing else moved.`,{undo:true,strings:[id]});
+}
+// Re-plan open meals: Plan my week again for this week's open meals. Locked batches stay (everything she
+// added or edited, and suggestions she locked in); unlocked suggestions may be replaced. The toast names them. One Undo.
+function replanOpen() {
+  const now=new Date(),options={...(ui.planOptions||DEFAULT_PLAN_OPTIONS),matchIngredients:ui.matchIngredients};
+  const proposal=suggestPlan(state,{...options,avoid:state.avoid,recentPlans:ui.recentPlans,now});
+  if(!proposal.added.length){toast(proposal.unfilled?'Nothing new fits the open meals right now. Try Preview & fine-tune.':'No open meals to re-plan this week.');return;}
+  ui.recentPlans.push([...new Set(proposal.added.map(b=>b.recipeId))]);ui.recentPlans=ui.recentPlans.slice(-12);try{localStorage.setItem(RECENT_PLANS_STORE,JSON.stringify(ui.recentPlans));}catch{}
+  commit(proposal.state,`Re-planned the open meals: ${count(proposal.added.length,'new batch','new batches')}.${planSummary(proposal)}${styleNote()}`,{undo:true,strings:proposal.added.map(b=>b.id)});
 }
 function planner() {
   const result=schedule(state),byId=Object.fromEntries(state.batches.map(b=>[b.id,b]));
-  const relevant=state.batches.filter(b=>dayOf(b.startSlot)<=addDays(state.week,6)&&b.useBy>=state.week);
+  // Your batches: cooked in (or before) this week and still good, or with a meal on this week's calendar.
+  const inWeek=id=>dayOf(id)>=state.week&&dayOf(id)<=addDays(state.week,6);
+  const relevant=state.batches.filter(b=>(dayOf(b.startSlot)<=addDays(state.week,6)&&b.useBy>=state.week)||batchMeals(state,b.id).some(inWeek));
   // Extras in the fridge: portions not on the calendar (skipped, or that didn't fit).
   const extras=state.batches.filter(b=>result.remaining[b.id]>0&&dayOf(b.startSlot)<=addDays(state.week,6)&&keepsUntil(b)>=state.week);
   const cooks=Object.fromEntries(cookDays(state).map(g=>[g.date,g])),skips=Object.values(result.cells).filter(c=>c.skip&&dayOf(c.id)>=state.week&&dayOf(c.id)<=addDays(state.week,6)).length;
@@ -317,13 +499,14 @@ function planner() {
   <p class="week-summary"><span><b>${filled}</b>/21 meals</span><span><b>${relevant.length}</b> ${pluralize(relevant.length,'batch')}</span>${skips?`<span><b>${skips}</b> skipped</span>`:''}<span title="Cost of quantities used by batches starting this week, including pantry ingredients${skipSpend(state)?', plus what you noted for skipped meals':''}. Not your checkout total."><b>${money(groceries.used+skipSpend(state))}</b> of food</span></p>
   <div class="planner-tools"><div class="segmented" aria-label="Week view"><button data-action="planner-view" data-id="calendar" aria-pressed="${ui.plannerView==='calendar'}" class="${ui.plannerView==='calendar'?'selected':''}">Meal calendar</button><button data-action="planner-view" data-id="prep" aria-pressed="${ui.plannerView==='prep'}" class="${ui.plannerView==='prep'?'selected':''}">Cooking & packing</button></div></div>
   ${ui.plannerView==='prep'?preparationView():''}<div class="calendar-panel" ${ui.plannerView==='prep'?'hidden':''}>
-  <div class="board-controls"><div><label class="toggle"><input id="show-snacks" type="checkbox" ${state.showSnacks?'checked':''}><span></span>Show snacks${snacks&&!state.showSnacks?` (${snacks} planned)`:''}</label>${state.showSnacks?`<select id="snack-count" aria-label="Snack slots per gap"><option value="2" ${state.snackCount===2?'selected':''}>2 between meals</option><option value="1" ${state.snackCount===1?'selected':''}>1 between meals</option></select>`:''}</div><div><button class="text-button undo-button" data-action="undo" ${!ui.history.length?'disabled':''}>↶ Undo</button><button class="text-button clear-week" data-action="clear">Clear week</button></div></div>
+  <div class="board-controls"><div><label class="toggle"><input id="show-snacks" type="checkbox" ${state.showSnacks?'checked':''}><span></span><em class="snack-text"><em class="snack-show">Show </em>snacks</em>${snacks&&!state.showSnacks?` (${snacks} planned)`:''}</label>${state.showSnacks?`<select id="snack-count" aria-label="Snack slots per gap"><option value="2" ${state.snackCount===2?'selected':''}>2 between meals</option><option value="1" ${state.snackCount===1?'selected':''}>1 between meals</option></select>`:''}</div><div class="week-fixes"><button class="text-button undo-button" data-action="undo" ${!ui.history.length?'disabled':''}>↶ Undo</button><button class="text-button tidy-week" data-action="tidy-week" aria-label="Tidy week" title="Straighten every string: each batch's meals back in a row after its first meal. Nothing else moves.">${TIDY_ICON}Tidy<span class="long"> week</span></button><button class="text-button replan-open" data-action="replan-open" aria-label="Re-plan open meals" title="Plan my week again for the open meals. Locked batches stay; unlocked suggestions may be swapped for new ideas.">Re-plan<span class="long"> open meals</span></button><button class="text-button clear-week" data-action="clear" aria-label="Clear week">Clear<span class="long"> week</span></button></div></div>
   ${ui.pick?pickBanner(byId):''}
   ${ui.isExample?`<div class="demo-banner">${ratLive('wave','banner-rat')}<span>An example week to play with. Drag a meal from the library, or clear the week and start your own.</span></div>`:''}
-  <nav class="day-jumps" aria-label="Jump to day">${days().map(d=>`<button data-action="jump-day" data-id="${d}" class="${d===localDate()?'is-today':''}" aria-label="Show ${fmt(d,{weekday:'long'})}, ${shortDate(d)}${cooks[d]?.batches.length?`. ${esc(cookLabel(cooks[d]))}`:''}"><span>${fmt(d,{weekday:'short'})}</span><b>${fmt(d,{day:'numeric'})}</b>${cooks[d]?.batches.length?`<i class="chip-pot">${POT}</i>`:''}</button>`).join('')}</nav><div class="week-scroll"><div class="week-grid">${days().map(d=>`<section data-day="${d}" class="day-column ${d===localDate()?'is-today':''}" aria-label="${fmt(d,{weekday:'long'})}"><header class="day-heading"><span>${fmt(d,{weekday:'short'})}</span><b>${fmt(d,{day:'numeric'})}</b>${d===localDate()?`${rat('face','today-rat')}<span class="today-dot">TODAY</span>`:''}${cookMark(cooks[d])}</header>${activeTypes(state.snackCount).filter(t=>state.showSnacks||!t.startsWith('snack')).map(t=>calendarCell(slot(d,t),result,byId)).join('')}${daySummary(d,result)}</section>`).join('')}</div></div>
+  <nav class="day-jumps" aria-label="Jump to day">${days().map(d=>`<button data-action="jump-day" data-id="${d}" class="${d===localDate()?'is-today':''}" aria-label="Show ${fmt(d,{weekday:'long'})}, ${shortDate(d)}${cooks[d]?.batches.length?`. ${esc(cookLabel(cooks[d]))}`:''}"><span>${fmt(d,{weekday:'short'})}</span><b>${fmt(d,{day:'numeric'})}</b>${cooks[d]?.batches.length?`<i class="chip-pot">${POT}</i>`:''}</button>`).join('')}</nav><div class="week-scroll"><div class="week-grid">${days().map(d=>keep(`day-${d}`,`<section data-day="${d}" class="day-column ${d===localDate()?'is-today':''}" aria-label="${fmt(d,{weekday:'long'})}"><header class="day-heading"><span>${fmt(d,{weekday:'short'})}</span><b>${fmt(d,{day:'numeric'})}</b>${d===localDate()?`${rat('face','today-rat')}<span class="today-dot">TODAY</span>`:''}${cookMark(cooks[d])}</header>${activeTypes(state.snackCount).filter(t=>state.showSnacks||!t.startsWith('snack')).map(t=>calendarCell(slot(d,t),result,byId)).join('')}${daySummary(d,result)}</section>`)).join('')}</div></div>
   <div class="skip-zone" data-skip-zone aria-hidden="true">${rat('takeout','skip-zone-rat')}<span>Drop here to skip this meal</span></div>
-  <div class="planner-footer"><span><i class="legend-dot"></i> Drag a card to move that meal. Drop it on another meal to swap them.</span><button class="text-button mobile-library" data-action="toggle-library">${ui.showLibrary?'Hide':'Browse'} meal ideas</button><button class="text-button" data-action="how">How it works ↗</button></div>
-  <section class="batches-section"><div class="section-heading">${rat('cheese','section-rat')}<div><span class="eyebrow">BATCH OVERVIEW</span><h3>Your batches</h3></div><span>${(n=>n?`${count(n,'extra')} in the fridge`:'Every portion is on your calendar')(extras.reduce((n,b)=>n+result.remaining[b.id],0))}</span></div>${extras.length?fridgeList(extras,result):''}<div class="batch-list">${relevant.map(b=>{const r=recipeById[b.recipeId],left=result.remaining[b.id]||0;return `<button class="batch-pill" style="${colors(r)}" draggable="true" data-batch="${b.id}" title="${left?'Drag onto a free slot to place a portion':'Drag to move its next meal'}, or open its recipe" data-action="batch" data-id="${b.id}"><span class="batch-thumb">${media(r)}</span><span><strong>${esc(r.title)}</strong><small>${count(b.portions,'portion')} · ${shortDate(dayOf(b.startSlot))} → ${shortDate(b.useBy)}</small><small class="${left?'warning-text':''}">${left?`${count(left,'extra')} in the fridge`:'Every portion is on your calendar'}</small></span><span>↗</span></button>`;}).join('')||`<p class="empty-batches">${ratLive('sleep','empty-rat')}<span>Add your first batch from the meal library. Its portions fill the next free slots.</span></p>`}</div>${upcoming.length?`<button class="text-button upcoming-batches" data-action="plan-week" data-id="${monday(dayOf(upcoming[0].startSlot))}">${count(upcoming.filter(b=>monday(dayOf(b.startSlot))===monday(dayOf(upcoming[0].startSlot))).length,'batch')} in the week of ${shortDate(monday(dayOf(upcoming[0].startSlot)))} →</button>`:''}</section></div></section>`;
+  ${ui.knotMenu&&byId[ui.knotMenu]?knotMenu(byId[ui.knotMenu],result):''}
+  <div class="planner-footer"><span><i class="legend-dot"></i> Drag a card to move that meal; drop it on another meal to swap. Drag a string’s knot to move the whole batch.</span><button class="text-button mobile-library" data-action="toggle-library">${ui.showLibrary?'Hide':'Browse'} meal ideas</button><button class="text-button" data-action="how">How it works ↗</button></div>
+  ${keep('batches',`<section class="batches-section"><div class="section-heading">${rat('cheese','section-rat')}<div><span class="eyebrow">BATCH OVERVIEW</span><h3>Your batches</h3></div><span>${(n=>n?`${count(n,'extra')} in the fridge`:'Every portion is on your calendar')(extras.reduce((n,b)=>n+result.remaining[b.id],0))}</span></div>${extras.length?fridgeList(extras,result):''}<div class="batch-list">${relevant.map(b=>{const r=recipeById[b.recipeId],left=result.remaining[b.id]||0;return `<button class="batch-pill" style="${colors(r)}" draggable="true" data-batch="${b.id}" title="${left?'Drag onto a free slot to place a portion':'Drag to move its next meal'}, or open its recipe" data-action="batch" data-id="${b.id}"><span class="batch-thumb">${media(r)}</span><span><strong>${esc(r.title)}${isLocked(b)?`<span class="pill-lock" title="Locked in">${LOCK_SVG}<span class="visually-hidden"> (locked in)</span></span>`:''}</strong><small>${count(b.portions,'portion')} · ${shortDate(dayOf(b.startSlot))} → ${shortDate(b.useBy)}</small><small class="${left?'warning-text':''}">${left?`${count(left,'extra')} in the fridge`:'Every portion is on your calendar'}</small></span><span>↗</span></button>`;}).join('')||`<p class="empty-batches">${ratLive('sleep','empty-rat')}<span>Add your first batch from the meal library. Its portions fill the next free slots.</span></p>`}</div>${upcoming.length?`<button class="text-button upcoming-batches" data-action="plan-week" data-id="${monday(dayOf(upcoming[0].startSlot))}">${count(upcoming.filter(b=>monday(dayOf(b.startSlot))===monday(dayOf(upcoming[0].startSlot))).length,'batch')} in the week of ${shortDate(monday(dayOf(upcoming[0].startSlot)))} →</button>`:''}</section>`)}</div></section>`;
 }
 function cookingStatus(context) {
   const total=recipeById[context.id].steps.length;
@@ -429,16 +612,70 @@ function groceriesView() {
   ${ui.shoppingMode?tools:''}<div class="grocery-summary" ${ui.stockMode?'hidden':''}><div><span>Whole-package estimate</span><b>${money(g.basket)}</b><small>Full week · pantry quantities deducted</small></div><div><span>Ingredients in recipes</span><b>${money(g.used)}</b><small>Includes food already in your pantry</small></div></div>
   <p class="fine-print">Pantry and cart quantities are saved for this week. Adding more food reopens items when you need more. Package rounding may leave extras. Prices exclude tax; pantry stock is not carried forward automatically. Remaining amounts don’t predict freshness; follow package storage guidance.</p></section>`;
 }
+// ------------------------------------------------ Rendering ------------------------------------------------
+// render() builds the whole page as one string, as always. To keep a change cheap (a phone restyles every new
+// element), parts that come out exactly the same as last time keep their elements: the meal library (~5,000
+// elements, 196 photos), the header, What's next, each day of the week and Your batches. A kept part is
+// never taken out of the page (a detached subtree loses its styles and costs a full restyle to put back);
+// everything else is replaced by the new elements, exactly as a full rebuild would. Same page either way.
+let KEPT=new Map(),NEXT=new Map();
+// keep(id, html) or keep(id, key, build): a part whose html (or key, when building it is itself costly) is
+// unchanged since the last render comes back as a placeholder and the page keeps its elements.
+function keep(id,key,build=null) {
+  const prev=KEPT.get(id);
+  if(prev&&prev.key===key&&prev.el?.isConnected){NEXT.set(id,prev);return `<i data-keep="${id}" hidden></i>`;}
+  const html=(build?build():key).replace(/^(\s*)<([a-z][\w-]*)/i,`$1<$2 data-k="${id}"`);
+  NEXT.set(id,{key});return html;
+}
+// A kept element's clock stamp (syncLoops) stays: its kept children may run their idle loops on it.
+const clockOnly=v=>/^\s*--clock:[^;]*;?\s*$/.test(v||'');
+function syncAttrs(live,fresh) {
+  for(const a of [...live.attributes])if(!fresh.hasAttribute(a.name)&&!(a.name==='style'&&clockOnly(a.value)))live.removeAttribute(a.name);
+  for(const a of fresh.attributes)if(live.getAttribute(a.name)!==a.value)live.setAttribute(a.name,a.value);
+}
+const keptFor=p=>NEXT.get(p.dataset.keep).el;
+function graft(live,fresh,root=false) {
+  if(!root)syncAttrs(live,fresh);
+  const want=[];
+  for(const c of [...fresh.childNodes]){
+    if(c.nodeType===1&&c.hasAttribute('data-keep')){want.push(keptFor(c));continue;}
+    const inner=c.nodeType===1&&c.querySelector('[data-keep]');
+    if(inner){
+      const k=keptFor(inner),lc=[...live.children].find(x=>x!==k&&x.contains(k));
+      if(lc&&lc.tagName===c.tagName&&!lc.hasAttribute('data-k')){graft(lc,c);want.push(lc);continue;}
+      for(const p of c.querySelectorAll('[data-keep]'))p.replaceWith(keptFor(p));
+    }
+    // Idle loops keep their phase: new elements get the page clock before they are styled (see syncLoops).
+    if(c.nodeType===1)syncLoops(c);
+    want.push(c);
+  }
+  const wanted=new Set(want);
+  for(const k of [...live.childNodes])if(!wanted.has(k))k.remove();
+  let cur=live.firstChild;
+  for(const n of want){if(n===cur){cur=cur.nextSibling;continue;}live.insertBefore(n,cur);}
+}
+function paint(html) {
+  const app=$('#app');
+  if(!html.includes('data-keep=')){syncLoops(app);app.innerHTML=html;}
+  else{const t=document.createElement('template');t.innerHTML=html;const box=document.createElement('div');box.append(t.content);graft(app,box,true);}
+  for(const [id,x] of NEXT)if(!x.el)x.el=app.querySelector(`[data-k="${id}"]`);
+  KEPT=NEXT;NEXT=new Map();
+}
+// Everything the library shows is in this key (building its 196 cards is itself a few ms on a phone).
+const libraryKey=large=>JSON.stringify([large,ui.showLibrary,ui.q,ui.ingredient,ui.kind,ui.method,ui.protein,ui.sort,ui.cheap,ui.quick,ui.easy,ui.onepot,ui.dump,ui.veg,ui.favorites,ui.moreFilters,
+  state.favorites,state.prices,state.packageSizes,state.estimates,state.avoid,state.cookStyle,localDate(),[...photoRetries.keys()]]);
+const keptLibrary=large=>keep(`library-${large}`,libraryKey(large),()=>library(large));
 function render() {
   const left=$('.week-scroll')?.scrollLeft||0,top=$('.library-scroll')?.scrollTop||0,focus=document.activeElement?.id,selection=document.activeElement?.selectionStart;
-  $('#app').innerHTML=`<header class="app-header"><a class="brand" href="#" data-action="nav" data-id="week"><span class="brand-mark">${ratLive('face')}<span class="visually-hidden">m<span>●</span></span></span><span class="wordmark">mealstack</span><span class="brand-sub">MEAL PLANNER</span></a><nav aria-label="Main navigation">${[['week','My week','calendar'],['meals','Meal library','bowl'],['groceries','Grocery list','basket']].map(([v,l,i])=>`<button data-action="nav" data-id="${v}" class="${ui.view===v?'active':''}" ${ui.view===v?'aria-current="page"':''}>${uiIcon(i)}${l}</button>`).join('')}</nav><div class="header-tools"><span class="saved"><i></i> Saved on this device</span><button class="icon-button theme-toggle" data-action="toggle-theme" aria-label="Dark mode" aria-pressed="${document.documentElement.dataset.theme==='dark'}" title="Switch to ${document.documentElement.dataset.theme==='dark'?'light':'dark'} mode"><svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4L19 5"/></svg><svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"/></svg></button><button class="icon-button" data-action="settings" aria-label="Plan settings, import and export">☰</button></div></header>
-  <main>${ui.view==='week'?`${homeTop()}<div class="workspace ${ui.showLibrary?'':'hide-library'}">${planner()}${library()}</div>`:ui.view==='meals'?`<div class="page-heading meals-heading"><span class="page-art" aria-hidden="true">${ratLive('cheese','page-rat anim-bob')}${deco('sparkle','page-deco p1 anim-twinkle')}${deco('heart','page-deco p2')}${deco('sparkle','page-deco p3 anim-twinkle')}</span><span class="eyebrow">EXPLORE THE MEAL LIBRARY</span><h1>What sounds good?</h1><p>${mealCounts.main} mains, ${mealCounts.breakfast} breakfasts, and ${mealCounts.snack} snacks with ingredients, cookware and step-by-step instructions.</p></div>${library(true)}`:groceriesView()}</main><footer class="app-footer"><span>Mealstack</span><span>Local to this browser · <button data-action="about">About the estimates</button></span></footer>`;
+  paint(`${keep('header',`<header class="app-header"><a class="brand" href="#" data-action="nav" data-id="week"><span class="brand-mark">${ratLive('face')}<span class="visually-hidden">m<span>●</span></span></span><span class="wordmark">mealstack</span><span class="brand-sub">MEAL PLANNER</span></a><nav aria-label="Main navigation">${[['week','My week','calendar'],['meals','Meal library','bowl'],['groceries','Grocery list','basket']].map(([v,l,i])=>`<button data-action="nav" data-id="${v}" class="${ui.view===v?'active':''}" ${ui.view===v?'aria-current="page"':''}>${uiIcon(i)}${l}</button>`).join('')}</nav><div class="header-tools"><span class="saved"><i></i> Saved on this device</span><button class="icon-button theme-toggle" data-action="toggle-theme" aria-label="Dark mode" aria-pressed="${document.documentElement.dataset.theme==='dark'}" title="Switch to ${document.documentElement.dataset.theme==='dark'?'light':'dark'} mode"><svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4L19 5"/></svg><svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"/></svg></button><button class="icon-button" data-action="settings" aria-label="Plan settings, import and export">☰</button></div></header>`)}
+  <main>${ui.view==='week'?`${keep('home',homeTop())}<div class="workspace ${ui.showLibrary?'':'hide-library'}">${planner()}${keptLibrary(false)}</div>`:ui.view==='meals'?`<div class="page-heading meals-heading"><span class="page-art" aria-hidden="true">${ratLive('cheese','page-rat anim-bob')}${deco('sparkle','page-deco p1 anim-twinkle')}${deco('heart','page-deco p2')}${deco('sparkle','page-deco p3 anim-twinkle')}</span><span class="eyebrow">EXPLORE THE MEAL LIBRARY</span><h1>What sounds good?</h1><p>${mealCounts.main} mains, ${mealCounts.breakfast} breakfasts, and ${mealCounts.snack} snacks with ingredients, cookware and step-by-step instructions.</p></div>${keptLibrary(true)}`:groceriesView()}</main><footer class="app-footer"><span>Mealstack</span><span>Local to this browser · <button data-action="about">About the estimates</button></span></footer>`);
   if($('.week-scroll'))$('.week-scroll').scrollLeft=left;
+  drawWeekStrings();placeKnotMenu();
   if($('.library-scroll'))$('.library-scroll').scrollTop=top;
   if(focus&&document.getElementById(focus)) {const el=document.getElementById(focus);el.focus({preventScroll:true});if(selection!==null && ['search','text'].includes(el.type))el.setSelectionRange(selection,selection);}
   // Entrance motion plays once per view change, never on ordinary re-renders.
   if(markViewEnter($('main'),ui.view+(ui.view==='week'?':'+ui.plannerView:'')+(ui.view==='groceries'?':'+(ui.stockMode?'stock':ui.shoppingMode?'shop':'review'):'')))wakePhotos();
-  syncLoops($('#app'));runFlashes();rollCart();placeDayPanel();
+  runFlashes();rollCart();placeDayPanel();
 }
 // A toast still showing when a dialog opens moves above it (the top layer stacks in opening order).
 const raiseToast=()=>{const t=$('#toast');if(t?.classList.contains('visible')&&t.showPopover){try{t.hidePopover();t.showPopover();}catch{}}};
@@ -456,18 +693,19 @@ function dialog(title,body,wide=false,{mascot=MODAL_MASCOTS[title]}={}) {
 function closeDialog() {const pantry=!!$('#pantry-dialog')||!!$('#pantry-amount-form');$('dialog')?.close();$('#dialog-root').innerHTML='';if(pantry)$('[data-action="pantry-open"]')?.focus({preventScroll:true});else refocus();}
 // Print the complete recipe/checklist, then restore the reader’s disclosures.
 let printOpened=[];
-window.addEventListener('beforeprint',()=>{printOpened=[...document.querySelectorAll('dialog[open] details:not([open]), .stock-timeline:not([open])')];printOpened.forEach(el=>el.open=true);});
+window.addEventListener('beforeprint',()=>{
+  // Printing shows every day's end-of-day details: fill the panels that are built only when opened.
+  for(const el of document.querySelectorAll('.day-close'))if(!el.querySelector('.day-close-body')?.childElementCount)fillDayPanel(el);
+  printOpened=[...document.querySelectorAll('dialog[open] details:not([open]), .stock-timeline:not([open])')];printOpened.forEach(el=>el.open=true);});
 window.addEventListener('afterprint',()=>{printOpened.forEach(el=>el.open=false);printOpened=[];});
-// Slots where she moved a meal of this batch (automatic placements are not shown as pins).
-const pinnedSlots=batchId=>Object.values(schedule(state).cells).filter(c=>c.manual&&c.chosen===batchId).map(c=>c.id);
 // Breakfasts and lunches are packed: made the evening before, as with a drop or a move.
 const packedAhead=type=>type==='breakfast'||type==='lunch';
 function openMeal(id,batchId=null,draft=null) {
   // A new recipe starts the way she cooks (How I cook): one fresh portion, or cooked on her prep day.
   const r=recipeById[id],batch=state.batches.find(b=>b.id===batchId),b=draft||batch||(type=>{const {id:_,...x}=styledBatch(r.id,slot(state.week,type),cookStyle(),prepFloor(new Date()));return x;})(r.kind==='main'?'dinner':r.kind==='snack'?'snack-pm-1':'breakfast');
-  const pins=batch?pinnedSlots(batch.id).length:0,nightBefore=!b.prepDate&&(packedAhead(typeOf(b.startSlot))||!!b.nightBefore);
+  const nightBefore=!b.prepDate&&(packedAhead(typeOf(b.startSlot))||!!b.nightBefore);
   const cost=batchCost(r,b.scale,state.prices,state.packageSizes),src=SOURCES[r.source],cleanup=b.estimates?.cleanup??state.estimates[r.id]?.cleanup??cleanupFor(r,cleanupContext(b)).total;
-  dialog(batch?'Your batch':'Meet your next meal',`<div class="meal-detail-hero" style="${colors(r)}"><div class="hero-media">${media(r,'hero')}<span class="img-chip hero-chip">${esc(METHOD_NAMES[r.method])} · ${esc(r.cuisine)}</span><h3 class="sticker">${esc(r.title)}</h3>${ratLive('peek','hero-rat')}</div><p>${esc(r.description)}</p></div>${batch?`<div class="batch-quick"><button type="button" class="secondary" data-action="slide-batch" data-id="${batch.id}">Move whole batch</button>${pins?`<button type="button" class="secondary" data-action="unpin-batch" data-id="${batch.id}">${pins>1?`Put all ${pins} back`:'Put back'}</button>`:''}<button type="button" class="danger text-button" data-action="delete-batch" data-id="${batch.id}">Remove batch</button></div>`:''}<div class="detail-metrics"><div><b>${money(cost)}</b><span>ingredients used</span></div><div><b>${money(cost/b.portions)}</b><span>per ${r.kind==='snack'?'snack':'portion'}</span></div><div><b>${estimate(r).active} / ${estimate(r).total}m</b><span>active / total*</span></div><div><button class="cleanup-metric" data-action="jump-cleanup"><b>${cleanup}</b><span>${pluralize(cleanup,'thing')} to wash ↘</span></button></div></div>
+  dialog(batch?'Your batch':'Meet your next meal',`<div class="meal-detail-hero" style="${colors(r)}"><div class="hero-media">${media(r,'hero')}<span class="img-chip hero-chip">${esc(METHOD_NAMES[r.method])} · ${esc(r.cuisine)}</span><h3 class="sticker">${esc(r.title)}</h3>${ratLive('peek','hero-rat')}</div><p>${esc(r.description)}</p></div>${batch?`<div class="batch-quick">${lockButton(batch,'dlg')}<button type="button" class="secondary" data-action="slide-batch" data-id="${batch.id}">Move whole batch</button><button type="button" class="secondary" data-action="dialog-straighten" data-id="${batch.id}">Straighten string</button><button type="button" class="danger text-button" data-action="delete-batch" data-id="${batch.id}">Remove batch</button></div>`:''}<div class="detail-metrics"><div><b>${money(cost)}</b><span>ingredients used</span></div><div><b>${money(cost/b.portions)}</b><span>per ${r.kind==='snack'?'snack':'portion'}</span></div><div><b>${estimate(r).active} / ${estimate(r).total}m</b><span>active / total*</span></div><div><button class="cleanup-metric" data-action="jump-cleanup"><b>${cleanup}</b><span>${pluralize(cleanup,'thing')} to wash ↘</span></button></div></div>
   <div class="recipe-actions"><button class="primary" data-action="start-cooking" data-id="${r.id}">Start cooking →</button><button class="secondary" data-action="print">Print recipe</button><button class="text-button" data-action="jump-recipe">↓ Cooking instructions</button></div><form id="meal-form" data-recipe="${r.id}" data-batch="${batch?.id||''}" data-prep-ahead="${!!b.prepAhead}"><h4>Plan this batch</h4>${batch?'':styleChip('meal')}<div class="form-row"><label>Batch size<select name="scale" id="batch-scale">${[0.5,1,1.5,2].map(n=>`<option value="${n}" ${b.scale===n?'selected':''}>${n===1?'Standard':formatNumber(n)+'×'} ingredients</option>`).join('')}${![0.5,1,1.5,2].includes(b.scale)?`<option value="${b.scale}" selected>${formatNumber(b.scale)}× ingredients</option>`:''}</select></label><label>How many to cook<input name="portions" type="number" min="1" max="30" required value="${b.portions}" id="batch-portions" aria-describedby="portions-help"></label></div><p class="field-help" id="portions-help">${r.kind==='snack'?'Snacks':'Filling meals'}. Makes <strong>${count(r.servings,r.kind==='snack'?'snack':'meal')}</strong> per standard batch.${batch?' Fewer takes extras in the fridge off first, then the latest meals; it saves right away.':' Change the batch size to use more or fewer ingredients.'}</p>
   <div class="form-row batch-dates"><label><span data-available-label>${b.prepAhead||b.prepDate?'Available date':'Make / available date'}</span><input type="date" name="date" required value="${dayOf(b.startSlot)}" min="2000-01-03" max="2099-12-24"></label><label>First available at<select name="type">${activeTypes(state.snackCount).map(t=>`<option value="${t}" ${typeOf(b.startSlot)===t?'selected':''}>${SLOT_LABELS[t]}</option>`).join('')}</select></label><label>Enjoy by<input name="useBy" type="date" required value="${b.useBy||addDays(dayOf(b.startSlot),r.qualityDays-(b.prepAhead&&!b.prepDate?1:0))}" min="${preparationDate(b)}" max="${addDays(dayOf(b.startSlot),7)}"></label></div>
   <label class="prep-choice night-before"><input type="checkbox" name="nightBefore" ${nightBefore?'checked':''} ${packedAhead(typeOf(b.startSlot))||b.prepDate?'disabled':''}><span>Cook it the night before<small>${b.prepDate?'Your prep date below decides.':packedAhead(typeOf(b.startSlot))?'Packed breakfasts and lunches always are.':'Handy for a dinner after a long day.'}</small></span></label>
@@ -540,7 +778,7 @@ function prepNotes(proposal) {
 }
 function planPreview(proposal) {
   const groceries=shopping(proposal.state),result=schedule(proposal.state);
-  return `  ${proposal.weekNote?`<p class="notice plan-week-note" data-planning-week="${proposal.state.week}">${proposal.weekNote}</p>`:''}${proposal.replaced.length?`<p class="notice">This preview replaces ${proposal.replaced.length} earlier suggested batches in this week when you choose “Use this mix”. Your current plan stays as it is until then.</p>`:''}
+  return `  ${proposal.weekNote?`<p class="notice plan-week-note" data-planning-week="${proposal.state.week}">${proposal.weekNote}</p>`:''}${proposal.replaced.length?`<p class="notice">This mix replaces ${count(proposal.replaced.length,'unlocked batch','unlocked batches')} when you choose “Use this mix”: ${esc(proposal.replaced.map(b=>recipeById[b.recipeId].title).join(', '))}. Locked batches stay. Your current plan stays as it is until then.</p>`:''}
   ${proposal.repeated?'<p class="notice">These settings leave limited variety. Broaden the cost, effort or ingredient limits for more combinations.</p>':''}
   <div class="plan-preview-summary"><div><b>${proposal.added.length}</b><span>new cooking sessions</span></div><div><b>${proposal.added.reduce((n,b)=>n+b.portions,0)}</b><span>portions placed</span></div><div><b>${money(groceries.basket)}</b><span>week’s grocery estimate</span></div><div><b data-preview-items>${groceries.items.filter(i=>i.remainingPacks>0).length}</b><span>items to buy</span></div></div>
   ${prepNotes(proposal)}
@@ -578,7 +816,7 @@ function planningDialog() {
   const options={...(ui.planOptions||DEFAULT_PLAN_OPTIONS),matchIngredients:ui.matchIngredients};
   const proposal=generatePlan(options);
   dialog('Plan your week',`<div class="plan-scroll">
-    <p class="plan-intro">Find a mix you like. Meals you added or edited stay in place.</p>
+    <p class="plan-intro">Find a mix you like. Locked batches (everything you added or edited) stay in place.</p>
     <form id="plan-suggestion-form">
       <details class="style-choice" ${ui.styleOpen?'open':''}><summary>${uiIcon('pot')}<span>Cooking style: <b>${esc(styleName())}</b></span><span class="style-change">change</span></summary>${cookStyleChooser()}</details>
       <div class="plan-limits">
@@ -609,11 +847,13 @@ const dayGap=(a,b)=>Math.round((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:
 // overview pill. A card moves one meal (moveMeal), "Move whole batch" slides the batch.
 // Refusals explain themselves in the toast and change nothing; a drop that changes
 // nothing adds no undo step.
-// Toast notes for meals that are past their best after a change ("softer", still fine).
-const softNote=(r,title,target)=>{
-  const mine=r.softer?.find(x=>x.slot===target);
-  const others=(r.softer||[]).filter(x=>x!==mine).map(x=>`${titleOfBatch(x.batchId)} might be a little less crisp by ${fmt(dayOf(x.slot),{weekday:'short'})}.`);
-  return [mine?`Might be a little less crisp by ${fmt(dayOf(target),{weekday:'short'})}.`:'',...others].filter(Boolean).map(t=>' '+t).join('');
+// Toast notes for meals that are mushy or past fridge-safe after a change. Shown, never enforced.
+// The batch the toast is about (self) goes without its name: "Might be a little mushy by Thu."
+const lateNote=(r,self=null)=>{
+  const late=r.late||[],unsafe=late.filter(x=>x.state==='unsafe'),mushy=late.filter(x=>x.state==='mushy');
+  const u=unsafe.map(x=>`${x.batchId===self?'':`${titleOfBatch(x.batchId)}: `}${where(x.slot)} is ${x.day} days after cooking, past fridge-safe (USDA says 3–4 days).`);
+  const names=[...new Set(mushy.map(x=>x.batchId))],m=mushy.length?[`${names.length===1&&names[0]===self?'Might':`${names.map(titleOfBatch).join(' and ')} might`} be a little mushy by ${fmt(dayOf(mushy[0].slot),{weekday:'short'})}.`]:[];
+  return [...u,...m].map(t=>' '+t).join('');
 };
 const styleNote=()=>cookStyle().mode==='leftovers'?'':` Cooking style: ${styleName()}.`;
 function applyDrop(payload,target) {
@@ -632,15 +872,16 @@ function applyDrop(payload,target) {
     if(payload.kind==='skip') {
       const r=moveSkip(state,payload.from,target,{now});ui.pick=null;
       if(!r.changed){render();return;}
-      if(commit(r.state,r.swapped?`Skip and ${titleOfBatch(r.swapped.batchId)} swapped.${softNote(r,'',payload.from)}`:`Skip moved to ${where(target)}.`,{undo:true}))celebratePlaced(target);
+      if(commit(r.state,r.swapped?`Skip and ${titleOfBatch(r.swapped.batchId)} swapped.${lateNote(r)}`:`Skip moved to ${where(target)}.`,{undo:true,strings:r.swapped?[r.swapped.batchId]:[]}))celebratePlaced(target);
       return;
     }
     const title=titleOfBatch(payload.id);
     if(payload.kind==='slide') {
-      const b=state.batches.find(x=>x.id===payload.id),days=b?dayGap(dayOf(earliestMeal(b.id)||b.startSlot),dayOf(target)):0;
+      const b=state.batches.find(x=>x.id===payload.id),from=payload.anchor&&state.placements?.[payload.anchor]===payload.id?payload.anchor:earliestMeal(payload.id)||b?.startSlot,days=b?dayGap(dayOf(from),dayOf(target)):0;
       const r=slideBatch(state,payload.id,days,{now});ui.pick=null;
       if(!r.changed){render();return;}
-      if(commit(r.state,`${title} moved ${count(Math.abs(days),'day')} ${days>0?'later':'earlier'}.`,{undo:true}))celebratePlaced(target);
+      // The batch lands by whole days: its first meal keeps its meal type, so that is the card to celebrate.
+      if(commit(r.state,`${title}: whole batch moved ${count(Math.abs(days),'day')} ${days>0?'later':'earlier'}. ${slideMessage(title,b,r)}`,{undo:true,strings:[payload.id]}))celebratePlaced(batchMeals(state,payload.id)[0]||target);
       return;
     }
     const before=state.batches.find(x=>x.id===payload.id),from=payload.kind==='unplaced'?null:payload.from,r=moveMeal(state,payload.id,from,target,{now});
@@ -652,7 +893,12 @@ function applyDrop(payload,target) {
     const skipMoved=from&&r.state.skipped?.[from]&&!state.skipped?.[from];
     const message=r.swapped?`${title} and ${partner} swapped.`:`${title} ${from===null?'placed on':'moved to'} ${where(target)}.${r.bumped?` ${titleOfBatch(r.bumped.batchId)} waits in the fridge as an extra.`:''}${r.skipGone?' The skip there is gone.':''}${skipMoved?` The skip moved to ${where(from)}.`:''}`;
     const partnerCook=r.swapped&&cookDay(r.state,r.swapped.batchId)!==cookDay(state,r.swapped.batchId)?` ${partner} now cooks ${day(cookDay(r.state,r.swapped.batchId))}.`:'';
-    if(commit(r.state,`${message}${before&&cook!==batchWindow(before).cookDay?` ${r.swapped?`${title} now cooks`:'Cook day is now'} ${day(cook)}.`:''}${partnerCook}${softNote(r,title,target)}`,{undo:true}))celebratePlaced(target);
+    // The cook meal moved on its own: offer the whole-batch move in the same toast.
+    // (Only to another day: a whole-batch move keeps meal types, so on the same day there'd be nothing to move.)
+    const wasFirst=from&&before&&batchMeals(state,payload.id)[0]===from&&!r.swapped&&!r.bumped&&dayOf(from)!==dayOf(target);
+    const more=wasFirst?[{action:'slide-instead',id:payload.id,label:'Move whole batch instead'}]:[];
+    if(wasFirst)ui.slideInstead={id:payload.id,days:dayGap(dayOf(from),dayOf(target)),target};
+    if(commit(r.state,`${message}${before&&cook!==batchWindow(before).cookDay?` ${r.swapped?`${title} now cooks`:'Cook day is now'} ${day(cook)}.`:''}${partnerCook}${lateNote(r,payload.id)}`,{undo:true,more,strings:[payload.id,...(r.swapped?[r.swapped.batchId]:[])]}))celebratePlaced(target);
   } catch(e) {if(ui.pick){ui.pick=null;render();}toast(e.message,'error');}
 }
 // Skip a slot: an empty one gets a skip card; a meal there waits in the fridge as an extra. One Undo.
@@ -692,7 +938,7 @@ const FETCH_EXIT={hold:rat('holdjoy'),peek:rat('peekjoy'),cheer:rat('hooray'),st
 const fetchFrom=card=>{if(card?.isConnected)fetchCard(card,$('dialog'),{hold:ratLive('hold'),peek:ratLive('peek'),exit:FETCH_EXIT});};
 function download(name,data,type) {const url=URL.createObjectURL(new Blob([data],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function about() {dialog('About Mealstack',`<div class="prose"><p>${esc(DATA_NOTE)}</p><p><strong>Portions:</strong> portion estimates allow for generous meals. Adjust the number of portions to suit your appetite, or change the batch size to scale the ingredients. Snacks are labeled separately.</p><p><strong>Prices:</strong> meal costs cover the quantities used. Your grocery list rounds up to whole packages. Update package sizes and whole-package prices in the grocery list or a meal’s ingredient table. Food left shows the planned ingredient balance after each cooking day. Prices are not connected to a live store feed.</p><p><strong>Enjoy-by dates:</strong> batches start with a 1–2-day window to help keep meals fresh. You can change this in the batch details. Portions are scheduled on or before that date. For safe storage and reheating, see <a href="https://www.fsis.usda.gov/food-safety/safe-food-handling-and-preparation/food-safety-basics/leftovers-and-food-safety" target="_blank" rel="noopener noreferrer">USDA leftover guidance ↗</a>.</p><p><strong>Your plan:</strong> changes save in this browser. Export a backup to keep a copy or move your plan to another device. Plans do not sync automatically.</p></div>`);}
-function how() {dialog('One batch. A few good meals.',`<div class="prose"><p><strong>1. Find a meal.</strong> Open its details to check ingredients, cost, time and cleanup. Drag its card onto the week, or use its ⠿ button and choose a slot. It goes exactly where you put it. If a meal was already there, that one waits in the fridge as an extra.</p><p><strong>2. Let the portions spread out.</strong> A three-portion batch fills up to three free slots, from the one you chose through its enjoy-by date. How it cooks follows <em>How I cook</em> in settings (leftovers, fresh each meal, or prep days); a “Cooking style” chip shows it wherever it matters.</p><p><strong>3. A card is one meal.</strong> Drag a card, or tap its ⠿ button and then a slot, to eat that meal somewhere else. Nothing else moves. Drop it on another meal and the two swap. Use ‹ › while holding it to move it to another week. Until you cook, the cook day follows the batch’s first meal (the evening before for breakfasts, lunches, and dinners you cook the night before).</p><p><strong>4. Fresh, softer, too old.</strong> Food is at its best until its enjoy-by date. Up to three days after it was cooked it’s still fine, just a little softer: the card says so. After that the move is refused.</p><p><strong>5. Skip a meal.</strong> Tap an empty slot’s ＋ and “Skip this meal”, or pick up a card and choose “Skip this meal” (on a computer, Delete). Add a label, cost or note if you like. A meal you skip waits under Your batches as an extra in the fridge: put it back, toss it, or cook smaller if it isn’t cooked yet.</p><p><strong>6. Moved by you.</strong> A pin marks a meal you moved. Tap its × to put it back where it was, if that spot is still free. The pot on a day shows how many batches you cook that day; a tiny chef rat marks the meal you cook it for.</p></div>`);}
+function how() {dialog('One batch. A few good meals.',`<div class="prose"><p><strong>1. Find a meal.</strong> Open its details to check ingredients, cost, time and cleanup. Drag its card onto the week, or use its ⠿ button and choose a slot. It goes exactly where you put it. If a meal was already there, that one waits in the fridge as an extra.</p><p><strong>2. One batch, one string.</strong> A batch fills a few free slots after the one you chose. A little coloured string runs through its meals, and the <em>knot</em> sits on the meal you cook it for (that card also wears the chef rat and “1/3”). Hover or tap a card to lift its string: it shows when it cooks and when to enjoy it by.</p><p><strong>3. A card is one meal.</strong> Drag a card, or tap its ⠿ button and then a slot, to eat that meal somewhere else, on any day, even one that’s over. Drop it on another meal and the two swap. The cook day follows the batch’s first meal (the evening before for breakfasts, lunches and night-before dinners).</p><p><strong>4. The knot moves the whole batch.</strong> Drag the knot to another day (or week) and every meal and the cook day go with it. Anything in the way waits in the fridge. Tap the knot for <em>Straighten string</em> (meals back in a row), <em>Cook it another day</em>, and more. <em>Tidy week</em> straightens every string; <em>Re-plan open meals</em> plans again around your locked batches.</p><p><strong>Lock in.</strong> A batch with a little padlock on its knot is locked in: <em>Plan my week</em> and <em>Re-plan open meals</em> never replace it. Everything you add or edit is locked; the planner’s suggestions start unlocked. Tap the knot (or open the batch) and tap <em>Lock in</em> or <em>Locked in</em> to change it. A lock never stops you moving, skipping or removing anything yourself.</p><p><strong>5. Fresh, mushy, past fridge-safe.</strong> Food is at its best until its enjoy-by date. After that it’s “mushy” but fine up to four days after cooking. From day 5 the card turns red: past fridge-safe (USDA: cooked leftovers keep 3–4 days in the fridge). You can still put it there; the calendar just shows it.</p><p><strong>6. Skip a meal.</strong> Tap an empty slot’s ＋ and “Skip this meal”, or pick up a card and choose “Skip this meal” (on a computer, Delete). A meal you skip waits under Your batches as an extra in the fridge: put it back, choose a slot, toss it, or cook smaller if it isn’t cooked yet.</p><p><strong>7. Every change is one Undo.</strong> The pot on a day shows how many batches you cook that day.</p></div>`);}
 function settings() {dialog('Your plan',`<section class="how-i-cook" id="how-i-cook" aria-labelledby="how-i-cook-title"><h3 id="how-i-cook-title">How I cook</h3><p class="field-help">Plan my week and new recipes follow this. You’ll see it wherever it shapes a suggestion.</p>${cookStyleChooser()}</section><div class="prose"><p>Your week saves in this browser. Export it to keep a backup or open it on another device.</p><div class="settings-actions"><button class="secondary" data-action="export">↓ Export plan</button><label class="secondary file-button">↑ Import plan<input id="import-file" type="file" accept="application/json,.json"></label></div><button class="text-button" data-action="example">Load example week</button><button class="text-button" data-action="how">How moving meals works ↗</button><button class="text-button" data-action="about">About the estimates ↗</button></div><div class="settings-foot"><button class="text-button" data-action="reset-settings">Reset to defaults</button>${ui.settingsReturn?`<button class="primary" data-action="settings-back">${ui.settingsReturn.kind==='plan'?'Back to Plan my week':ui.settingsReturn.kind==='slot'?'Back to choosing a meal':'Back to the recipe'} →</button>`:'<button class="primary" data-action="close">Done</button>'}</div>`);}
 
 document.addEventListener('toggle',e=>{if(e.target.matches?.('.more-filters')&&e.target.isConnected)ui.moreFilters=e.target.open;},true);
@@ -700,9 +946,16 @@ document.addEventListener('toggle',e=>{if(e.target.matches?.('.more-filters')&&e
 document.addEventListener('click',e=>{
   if(ui.pick&&e.target.closest('.meal-slot')){applyDrop(ui.pick,e.target.closest('.meal-slot').dataset.slot);return;}
   const el=e.target.closest('[data-action]');
-  if(!el){if(ui.pick && e.target.closest('[data-slot]'))applyDrop(ui.pick,e.target.closest('[data-slot]').dataset.slot);return;}
+  if(!el){
+    if(ui.pick && e.target.closest('[data-slot]')){applyDrop(ui.pick,e.target.closest('[data-slot]').dataset.slot);return;}
+    // A tap on a card lifts its string (tap again, or anywhere else, to let go). A mouse hovers instead.
+    const card=e.target.closest('.week-grid .portion[data-batch]');
+    if(card&&!ui.justDragged)focusString(e.pointerType==='mouse'||ui.strFocus!==card.dataset.batch?card.dataset.batch:null);
+    else if(!card&&ui.strFocus&&!ui.knotMenu&&e.pointerType!=='mouse')focusString(null);
+    return;
+  }
   // A touch drag ends with a stray click on the calendar. Ignore that one, but never a toast's Undo.
-  if(ui.justDragged&&el.closest('.meal-slot,.batch-pill'))return;
+  if(ui.justDragged&&el.closest('.meal-slot,.batch-pill,.knot'))return;
   const a=el.dataset.action,id=el.dataset.id;
   if(el.disabled)return;
   if(el.closest('form') && el.type!=='submit')e.preventDefault();
@@ -736,7 +989,7 @@ document.addEventListener('click',e=>{
   if(a==='go-shop'){ui.view='groceries';ui.shoppingMode=true;ui.stockMode=false;ui.pick=null;render();window.scrollTo(0,0);}
   if(a==='apply-plan'&&ui.proposal?.added.length){
     updatePlanSettings();
-    if(!ui.planDirty){ui.view='week';if(commit(ui.proposal.state,'Your meals are planned. Open Grocery list to check your pantry.')){closeDialog();$('[data-action="suggest-plan"]')?.focus({preventScroll:true});fx('confetti');hop($('.next-rat'));}}
+    if(!ui.planDirty){ui.view='week';if(commit(ui.proposal.state,`Your meals are planned.${planSummary(ui.proposal)} Open Grocery list to check your pantry.`)){closeDialog();$('[data-action="suggest-plan"]')?.focus({preventScroll:true});fx('confetti');hop($('.next-rat'));}}
   }
   if(a==='shopping-mode'){ui.shoppingMode=id==='shop';ui.stockMode=id==='stock';render();document.querySelector(`.shopping-toolbar [data-id="${id}"]`)?.focus({preventScroll:true});}
   if(a==='day-close')setDayOpen(ui.dayOpen===id?null:id,{focus:true});
@@ -763,15 +1016,28 @@ document.addEventListener('click',e=>{
   if(a==='toggle-library'){ui.showLibrary=!ui.showLibrary;render();}
   if(a==='cancel-pick'){ui.pick=null;render();}
   if(a==='place'||a==='move'||a==='slide-batch'||a==='move-skip'||a==='pick-extra'){if(a==='slide-batch')closeDialog();ui.view='week';ui.plannerView='calendar';ui.pick=a==='place'?{kind:'recipe',id}:a==='slide-batch'?{kind:'slide',id}:a==='move-skip'?{kind:'skip',from:el.dataset.from}:a==='pick-extra'?{kind:'unplaced',id}:{kind:'batch',id,from:el.dataset.from};if(a==='place'&&recipeById[id].kind==='snack')state.showSnacks=true;render();toast(a==='slide-batch'?`Choose the day for its first meal. ${cancelHint()}`:`Choose a slot on the week. ${cancelHint()}`);$('.placement-banner')?.scrollIntoView({behavior:reduceMotion()?'auto':'smooth',block:'nearest'});}
-  if(a==='slot'){if(ui.pick)applyDrop(ui.pick,el.dataset.slot);else if(dayOf(el.dataset.slot)<localDate())toast(`${where(el.dataset.slot)} is already over.`,'error');else{dialog('Choose a batch for this slot',`<button type="button" class="skip-this" data-action="skip-slot" data-slot="${el.dataset.slot}">${rat('takeout','skip-this-rat')}<span><b>Skip this meal</b><small>Eating out, busy, or not hungry</small></span></button><p class="field-help">Or add a recipe for ${SLOT_LABELS[typeOf(el.dataset.slot)]}, ${shortDate(dayOf(el.dataset.slot))}. ${cookStyle().mode==='fresh'?'You cook one fresh portion for this meal.':'It creates its full batch.'}</p>${styleChip('slot')}<input type="search" id="slot-search" placeholder="Search meals and details" aria-label="Search meals for this slot"><div class="slot-picker">${(t=>RECIPES.filter(r=>matchesMeal(r,searchTerms(''))).map((r,i)=>[r,i]).sort(([a,i],[b,j])=>Number(!fitsSlotType(a,t))-Number(!fitsSlotType(b,t))||i-j).map(([r])=>r))(typeOf(el.dataset.slot)).map(r=>`<button data-action="quick-add" data-id="${r.id}" data-slot="${el.dataset.slot}" style="${colors(r)}"><span>${media(r,'thumb')}${esc(r.title)}</span><small>${(b=>`${count(b.portions,r.kind==='snack'?'snack':'portion')} · ${money(batchCost(r,b.scale,state.prices,state.packageSizes))}${b.portions>1?' / batch':''}`)(styledBatch(r.id,el.dataset.slot,cookStyle()))}</small></button>`).join('')}</div>`);}} 
+  if(a==='slot'){if(ui.pick)applyDrop(ui.pick,el.dataset.slot);else{dialog('Choose a batch for this slot',`<button type="button" class="skip-this" data-action="skip-slot" data-slot="${el.dataset.slot}">${rat('takeout','skip-this-rat')}<span><b>Skip this meal</b><small>Eating out, busy, or not hungry</small></span></button><p class="field-help">Or add a recipe for ${SLOT_LABELS[typeOf(el.dataset.slot)]}, ${shortDate(dayOf(el.dataset.slot))}. ${cookStyle().mode==='fresh'?'You cook one fresh portion for this meal.':'It creates its full batch.'}</p>${styleChip('slot')}<input type="search" id="slot-search" placeholder="Search meals and details" aria-label="Search meals for this slot"><div class="slot-picker">${(t=>RECIPES.filter(r=>matchesMeal(r,searchTerms(''))).map((r,i)=>[r,i]).sort(([a,i],[b,j])=>Number(!fitsSlotType(a,t))-Number(!fitsSlotType(b,t))||i-j).map(([r])=>r))(typeOf(el.dataset.slot)).map(r=>`<button data-action="quick-add" data-id="${r.id}" data-slot="${el.dataset.slot}" style="${colors(r)}"><span>${media(r,'thumb')}${esc(r.title)}</span><small>${(b=>`${count(b.portions,r.kind==='snack'?'snack':'portion')} · ${money(batchCost(r,b.scale,state.prices,state.packageSizes))}${b.portions>1?' / batch':''}`)(styledBatch(r.id,el.dataset.slot,cookStyle()))}</small></button>`).join('')}</div>`);}} 
   if(a==='quick-add'){closeDialog();applyDrop({kind:'recipe',id},el.dataset.slot);}
-  if(a==='unpin'){try{const spot=originalSpot(state,id),r=putBack(state,id,el.dataset.slot);if(r.changed)commit(r.state,`${titleOfBatch(id)} is back on ${where(spot)}.`,{undo:true});}catch(err){toast(err.message,'error');}}
-  if(a==='unpin-batch'){
-    // Put back every moved meal of this batch that still has its spot; one undo step.
-    closeDialog();let next=state,moved=0,refusal='';
-    for(const from of pinnedSlots(id)){try{const r=putBack(next,id,from);if(r.changed){next=r.state;moved++;}}catch(err){refusal||=err.message;}}
-    if(moved)commit(next,`${count(moved,'meal')} put back.${refusal?` ${refusal}`:''}`,{undo:true});else if(refusal)toast(refusal,'error');
-  }
+  if(a==='knot'){if(ui.knotMenu===id)closeKnotMenu();else openKnotMenu(id);}
+  if(a==='knot-close')closeKnotMenu();
+  if(a==='lock')toggleLock(id,el);
+  if(a==='dialog-straighten'){closeDialog();straighten(id);}
+  if(a==='knot-straighten')straighten(id);
+  if(a==='knot-cook'){const b=state.batches.find(x=>x.id===id),days=Number(el.dataset.days);ui.knotMenu=null;
+    try{const r=slideBatch(state,id,days,{now:new Date()});if(!r.changed){render();return;}
+      const cook=preparationDate(r.state.batches.find(x=>x.id===id));
+      if(commit(r.state,slideMessage(titleOfBatch(id),b,r),{undo:true,strings:[id]})&&(cook<state.week||cook>addDays(state.week,6)))showWeek(monday(cook));}catch(err){render();toast(err.message,'error');}}
+  if(a==='knot-fridge'){const r=fridgeLate(state,id);ui.knotMenu=null;
+    if(r.changed)commit(r.state,`${r.slots.map(where).join(', ')}: ${titleOfBatch(id)} waits in the fridge (${count(r.slots.length,'extra')}). Put it back or toss it under Your batches.`,{undo:true,strings:[id]});else render();}
+  if(a==='tidy-week'){const r=tidyWeek(state);
+    if(!r.changed)toast('Every string is already in a row.');
+    else commit(r.state,`Tidied ${count(r.straightened.length,'string')}. Each batch’s meals are back in a row; nothing moved between batches.${r.fridged?` ${count(r.fridged,'meal')} ${r.fridged>1?'wait':'waits'} in the fridge.`:''}`,{undo:true,strings:r.straightened});}
+  if(a==='replan-open')replanOpen();
+  if(a==='slide-instead'&&ui.slideInstead?.id===id&&ui.history.length){
+    // Undo the single move, then move the whole batch by the same days: one Undo step back to before.
+    const {days,target}=ui.slideInstead,prev=ui.history.at(-1),b=prev.batches.find(x=>x.id===id);ui.slideInstead=null;
+    try{const r=slideBatch(prev,id,days,{now:new Date()});ui.history.pop();state=prev;
+      if(commit(r.state,`${titleOfBatch(id)}: whole batch moved instead. ${slideMessage(titleOfBatch(id),b,r)}`,{undo:true,strings:[id]}))celebratePlaced(batchMeals(state,id)[0]||target);}catch(err){toast(err.message,'error');}}
   if(a==='undo'){if(ui.history.length){const shown=state.week;state=ui.history.pop();ui.pick=null;save();render();toast(state.week===shown?'Last change undone.':`Last change undone, in the week of ${shortDate(state.week)}.`);}}
   if(a==='clear')dialog('Clear this week?',`<div class="prose"><p>This removes batches made ${shortDate(state.week)} – ${shortDate(addDays(state.week,6))}. Batches carried in from an earlier week stay available. You can undo this.</p><div class="modal-actions"><button class="secondary" data-action="close">Keep the plan</button><button class="primary" data-action="confirm-clear">Clear week</button></div></div>`);
   if(a==='confirm-clear'){closeDialog();ui.pick=null;commit(removeBatches(state,state.batches.filter(b=>dayOf(b.startSlot)>=state.week&&dayOf(b.startSlot)<=addDays(state.week,6)).map(b=>b.id)),'Week cleared. Choose something new.');}
@@ -780,7 +1046,7 @@ document.addEventListener('click',e=>{
   if(a==='skip-picked'&&ui.pick?.from)doSkip(ui.pick.from);
   if(a==='skip-details')skipDialog(el.dataset.slot);
   if(a==='remove-skip'){closeDialog();commit(removeSkip(state,el.dataset.slot),`Skip removed from ${where(el.dataset.slot)}.`,{undo:true});}
-  if(a==='put-back-extra'){try{const r=placeExtra(state,id,{now:new Date()});if(commit(r.state,`${titleOfBatch(id)} is back on ${where(r.slot)}.${softNote(r,'',r.slot)}`,{undo:true}))celebratePlaced(r.slot);}catch(err){toast(err.message,'error');}}
+  if(a==='put-back-extra'){try{const r=placeExtra(state,id,{now:new Date()});if(commit(r.state,`${titleOfBatch(id)} is back on ${where(r.slot)}.${lateNote(r,id)}`,{undo:true,strings:[id]}))celebratePlaced(r.slot);}catch(err){toast(err.message,'error');}}
   if(a==='toss-extra'){try{commit(tossExtra(state,id),`Tossed 1 ${titleOfBatch(id)}.`,{undo:true});}catch(err){toast(err.message,'error');}}
   if(a==='cook-smaller'){try{commit(cookSmaller(state,id,{now:new Date()}),`${titleOfBatch(id)}: cooking 1 less. Groceries updated.`,{undo:true});}catch(err){toast(err.message,'error');}}
   if(a==='cook-day'){ui.plannerView='prep';ui.pick=null;render();const day=document.getElementById(`prep-day-${id}`);(day||$('.preparation-schedule'))?.scrollIntoView({behavior:reduceMotion()?'auto':'smooth',block:'start'});}
@@ -790,7 +1056,10 @@ document.addEventListener('click',e=>{
     settings();$('#how-i-cook [aria-checked="true"]')?.focus({preventScroll:true});
   }
   if(a==='settings-back'){const back=ui.settingsReturn;ui.settingsReturn=null;if(back?.kind==='meal')openMeal(back.id,back.batch,back.batch?back.draft:{...(({id:_,...x})=>x)(styledBatch(back.id,back.draft.startSlot,cookStyle(),prepFloor(new Date()))),estimates:back.draft.estimates});else if(back?.kind==='slot'){closeDialog();document.querySelector(`.meal-slot[data-slot="${CSS.escape(back.slot)}"] .empty-slot`)?.click();}else closeDialog();}
-  if(a==='set-cook-mode'){const cur=cookStyle();if(cur.mode!==id)setCookStyle(id==='prep'?{mode:'prep',days:cur.days||[0]}:{mode:id});}
+  // Switching away from Prep day(s) and back keeps the prep days she chose (remembered on this device).
+  if(a==='set-cook-mode'){const cur=cookStyle();if(cur.mode!==id){if(cur.mode==='prep')try{localStorage.setItem(PREP_DAYS_STORE,JSON.stringify(cur.days));}catch{}
+    let days=[0];try{const saved=JSON.parse(localStorage.getItem(PREP_DAYS_STORE)||'null');if(Array.isArray(saved)&&saved.length&&saved.every(d=>Number.isInteger(d)&&d>=0&&d<=6))days=saved;}catch{}
+    setCookStyle(id==='prep'?{mode:'prep',days}:{mode:id});}}
   if(a==='toggle-prep-day'){const cur=cookStyle(),d=Number(id),days=cur.days.includes(d)?cur.days.filter(x=>x!==d):[...cur.days,d].sort((a,b)=>a-b);if(!days.length)toast('Keep at least one prep day, or choose another cooking style.');else setCookStyle({mode:'prep',days});}
   if(a==='reset-settings'){ui.matchIngredients=true;try{localStorage.setItem(MATCH_INGREDIENTS_STORE,'true');}catch{}ui.planOptions=null;const m=$('#plan-suggestion-form [name="matchIngredients"]');if(m)m.checked=true;setCookStyle(resetSettings(state).cookStyle,'Settings reset to defaults: Leftovers, matching ingredients, $100 budget.');}
   if(a==='how')how();if(a==='about')about();if(a==='settings')settings();
@@ -807,7 +1076,7 @@ function updateMealDateLimits(form) {
   const {date,prepDate,useBy,separatePrep}=form.elements;
   if(!date.value)return;
   prepDate.min=addDays(date.value,-7);prepDate.max=date.value;
-  // Enjoy-by can't be before the food is cooked; after a prep day it may be before the first meal (eaten "softer").
+  // Enjoy-by can't be before the food is cooked; after a prep day it may be before the first meal (eaten "mushy").
   useBy.min=separatePrep.checked&&prepDate.value?prepDate.value:form.dataset.prepAhead==='true'?addDays(date.value,-1):date.value;useBy.max=addDays(date.value,7);
   const hint=form.querySelector('[data-relative-prep]');
   hint.hidden=separatePrep.checked||form.dataset.prepAhead!=='true';
@@ -842,8 +1111,7 @@ document.addEventListener('change',async e=>{
   if(el.dataset.cookStep!==undefined){const c=ui.cookContext,step=Number(el.dataset.cookStep),done=new Set(cookingStatus(c).done);if(el.checked)done.add(step);else done.delete(step);saveCookingProgress([...done]);el.closest('li').classList.toggle('complete',el.checked);$('#cook-progress').value=done.size;$('#cook-progress-label').textContent=`${done.size} of ${count(recipeById[c.id].steps.length,'step')} complete`;cookCheer(el,done.size,recipeById[c.id].steps.length);}
   if(el.id==='show-snacks')mutate(s=>s.showSnacks=el.checked);
   if(el.id==='snack-count'){
-    const n=Number(el.value),hasSecond=state.batches.some(b=>typeOf(b.startSlot).endsWith('-2'))||Object.values(schedule(state).cells).some(c=>c.chosen&&typeOf(c.id).endsWith('-2'));
-    if(n===1&&hasSecond){toast('Move snacks out of the second snack slots first.');render();}else mutate(s=>s.snackCount=n,'Snack slots updated.');
+    try{commit(setSnackCount(state,Number(el.value)),'Snack slots updated.');}catch(err){toast(err.message);render();}
   }
   if(el.dataset.pantry)mutate(s=>{const current=s.haveEnough[s.week]||[];s.haveEnough[s.week]=el.checked?[...new Set([...current,el.dataset.pantry])]:current.filter(id=>id!==el.dataset.pantry);s.pantryQty[s.week]??={};s.pantryQty[s.week][el.dataset.pantry]=el.checked?shopping(state).items.find(i=>i.id===el.dataset.pantry).qty:0;});
   if(el.dataset.price){const value=Number(el.value);if(el.value===''||!Number.isFinite(value)||value<0||value>1000){toast('Enter a package price from $0 to $1,000.','error');render();}else mutate(s=>s.prices[el.dataset.price]=value);}
@@ -856,7 +1124,7 @@ document.addEventListener('change',async e=>{
         const next=saveBatch(state,{...saved,portions:n}),after=cardsOf(next),gone=before.filter(x=>!after.includes(x)),added=after.filter(x=>!before.includes(x)),left=schedule(next).remaining[saved.id];
         const what=n<saved.portions?[extras-left>0?count(extras-left,'extra'):'',...gone.map(where)].filter(Boolean):added.map(where);
         const draft={...readMealForm(f),portions:n};
-        if(commit(next,`Cooking ${n} now.${what.length?` ${n<saved.portions?'Removed':'Added'} ${what.join(', ')}.`:''}${n>saved.portions&&left?` ${count(left,'extra')} in the fridge.`:''}`,{undo:true}))openMeal(f.dataset.recipe,saved.id,draft);
+        if(commit(next,`Cooking ${n} now.${what.length?` ${n<saved.portions?'Removed':'Added'} ${what.join(', ')}.`:''}${n>saved.portions&&left?` ${count(left,'extra')} in the fridge.`:''}${saved.autoPlanned?' Locked in: Plan my week keeps it.':''}`,{undo:true}))openMeal(f.dataset.recipe,saved.id,draft);
       }catch(err){toast(err.message,'error');}
       return;
     }
@@ -907,8 +1175,9 @@ document.addEventListener('submit',e=>{
     const next=structuredClone(state);next.estimates[r.id]=b.estimates;next.week=monday(dayOf(b.startSlot));ui.view='week';
     const {estimates,...fields}=b,edited={...makeBatch(r.id,b.startSlot,b.scale,b.portions),...fields,id:f.dataset.batch||crypto.randomUUID()};
     // Say what happened: how many are on the calendar and how many wait in the fridge.
+    const wasUnlocked=!!state.batches.find(x=>x.id===f.dataset.batch)?.autoPlanned;
     try {const saved=saveBatch(next,edited),left=schedule(saved).remaining[edited.id]||0,placed=b.portions-left;
-      if(commit(saved,`${f.dataset.batch?'Batch saved. ':''}${count(placed,'meal')} on your calendar${left?`, ${count(left,'extra')} in the fridge (see Your batches)`:''}.`,{undo:true}))closeDialog();} catch(err) {toast(err.message,'error');}
+      if(commit(saved,`${f.dataset.batch?'Batch saved. ':''}${count(placed,'meal')} on your calendar${left?`, ${count(left,'extra')} in the fridge (see Your batches)`:''}.${wasUnlocked?' Locked in: Plan my week keeps it.':''}`,{undo:true}))closeDialog();} catch(err) {toast(err.message,'error');}
   }
   if(e.target.id==='pantry-amount-form'){
     e.preventDefault();const f=e.target,id=f.dataset.id,item=pantryChoices(state,'',true).find(i=>i.id===id),amount=pantryAmount(new FormData(f).get('amount'),item);
@@ -932,6 +1201,7 @@ document.addEventListener('submit',e=>{
   }
 });
 document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&ui.knotMenu&&!document.querySelector('dialog[open]')){e.preventDefault();closeKnotMenu();return;}
   if(e.key==='Escape'&&ui.pick){ui.pick=null;render();}
   if(e.key==='Escape'&&ui.dayOpen&&!document.querySelector('dialog[open]')){e.preventDefault();setDayOpen(null,{focus:true});}
   // The phone sheet keeps Tab inside it while it covers the page.
@@ -1054,6 +1324,72 @@ document.addEventListener('pointerdown',e=>{
     else keepPicked(p);};
   document.addEventListener('pointermove',move,{passive:false});document.addEventListener('pointerup',finish);document.addEventListener('pointercancel',finish);
 });
+// Dragging a knot moves the whole batch (mouse, pen or finger). The first card lifts as a little
+// stack with a count; the slots it would land on are outlined in its colour, and anything in the
+// way is outlined red, "→ fridge". Released on a slot: one whole-batch move, one Undo. The board
+// scrolls near its edges and ‹ › (or the end of the board) flip the week, like a dragged card.
+function knotDragStart(e,knot) {
+  const id=knot.dataset.id,b=state.batches.find(x=>x.id===id);if(!b)return;
+  // The knot's card: the batch's first meal, or its first meal shown when that is a hidden snack. The batch moves by
+  // the days between that card and the slot it is dropped on.
+  const anchor=state.placements?.[knot.dataset.anchor]===id?knot.dataset.anchor:null;
+  const color=knot.style.getPropertyValue('--c')||'var(--s0)',title=recipeById[b.recipeId].title;
+  const last={x:e.clientX,y:e.clientY},start={...last};let moved=false,ghost=null,raf=0,frame=0,edgeSince=0,target=null,flipAt=null;
+  const clearMarks=()=>{for(const el of document.querySelectorAll('.knot-target,.knot-bump,.left-behind,.flip-target,.chip-target')){if(el.classList.contains('knot-target'))el.style.removeProperty('--c');el.classList.remove('knot-target','knot-bump','left-behind','flip-target','chip-target');delete el.dataset.bump;}};
+  const hint=(head,sub='')=>{const h=ghost?.querySelector('.kg-hint');if(h)h.innerHTML=`<b>${esc(head)}</b>${sub?`<small>${esc(sub)}</small>`:''}`;};
+  const preview=()=>{
+    frame=0;clearMarks();
+    for(const card of document.querySelectorAll(`.week-grid .portion[data-batch="${CSS.escape(id)}"]`))card.classList.add('left-behind');
+    const el=document.elementFromPoint(last.x,last.y),cell=el?.closest?.('.meal-slot'),flip=flipButton(el),chip=dayChip(el),meals=batchMeals(state,id);
+    if(flip){flip.classList.add('flip-target');if(flipAt?.action!==flip.dataset.action){clearTimeout(flipAt?.t);const action=flip.dataset.action;flipAt={action,t:setTimeout(()=>{flipAt=null;flipWeek(action);},600)};}}
+    else if(flipAt){clearTimeout(flipAt.t);flipAt=null;}
+    if(chip)chip.classList.add('chip-target');
+    target=cell?cell.dataset.slot:chip&&meals[0]?slot(chip.dataset.id,typeOf(anchor||meals[0])):null;
+    if(!target){hint(`Whole batch · ${count(meals.length,'meal')}`,'Drop it on a slot for its first meal');return;}
+    const days=slideDaysTo(state,id,target,anchor);
+    if(!days){hint('Where it is now','Drop it on another day to move every meal');return;}
+    const r=slideBatch(state,id,days,{now:new Date()}),nb=r.state.batches.find(x=>x.id===id);
+    for(const m of batchMeals(r.state,id)){const slotEl=document.querySelector(`.meal-slot[data-slot="${CSS.escape(m)}"]`);if(slotEl){slotEl.classList.add('knot-target');slotEl.style.setProperty('--c',color);}}
+    for(const x of [...r.bumped,...r.skipsGone.map(g=>({slot:g.slot,skip:true}))]){const slotEl=document.querySelector(`.meal-slot[data-slot="${CSS.escape(x.slot)}"]`);if(slotEl){slotEl.classList.add('knot-bump');slotEl.dataset.bump=x.skip?'skip goes':'→ fridge';}}
+    hint(`Whole batch · ${count(meals.length,'meal')} → ${fmt(dayOf(target),{weekday:'short'})}`,`Cooks ${dayWord(preparationDate(nb))}${r.bumped.length?` · ${bumpedNames(r.bumped,{slots:false})} → fridge`:''}`);
+  };
+  const tick=time=>{
+    raf=requestAnimationFrame(tick);const board=$('.week-scroll');
+    if(board){const r=board.getBoundingClientRect(),near=last.y>=r.top&&last.y<=r.bottom;let edge=0;
+      if(near&&last.x>r.right-38)edge=1;else if(near&&last.x<r.left+38)edge=-1;
+      if(edge){const end=edge>0?board.scrollLeft+board.clientWidth>=board.scrollWidth-2:board.scrollLeft<=0;
+        if(!end){board.scrollLeft+=edge*9;edgeSince=0;if(!frame)frame=requestAnimationFrame(preview);}
+        else{edgeSince||=time;if(time-edgeSince>700){edgeSince=0;flipWeek(edge>0?'next-week':'prev-week');const nb=$('.week-scroll');if(nb)nb.scrollLeft=edge>0?0:nb.scrollWidth;}}}
+      else edgeSince=0;}
+    if(last.y>innerHeight-75)window.scrollBy(0,9);if(last.y<75)window.scrollBy(0,-9);
+  };
+  const begin=()=>{
+    moved=true;if(ui.knotMenu){ui.knotMenu=null;$('.knot-menu-wrap')?.remove();}
+    document.body.classList.add('knot-dragging');
+    const meals=batchMeals(state,id),src=document.querySelector(`.week-grid .portion[data-batch="${CSS.escape(id)}"][data-from="${CSS.escape(anchor||meals[0]||'')}"]`)||document.querySelector(`.week-grid .portion[data-batch="${CSS.escape(id)}"]`);
+    const w=src?.offsetWidth||150,h=src?.offsetHeight||180;
+    ghost=document.createElement('div');ghost.className='knot-ghost';ghost.setAttribute('aria-hidden','true');ghost.inert=true;ghost.style.setProperty('--c',color);ghost.style.setProperty('--gw',`${w}px`);ghost.style.setProperty('--gh',`${h}px`);
+    ghost.innerHTML=`<span class="kg-stack"></span><span class="kg-stack"></span>${src?src.outerHTML:`<div class="portion kg-card"><b>${esc(title)}</b></div>`}<b class="kg-badge">${meals.length}</b><span class="kg-knot">${KNOT_ART}</span><span class="kg-hint"></span>`;
+    document.body.append(ghost);raf=requestAnimationFrame(tick);
+  };
+  const move=ev=>{last.x=ev.clientX;last.y=ev.clientY;
+    if(!moved){if(Math.hypot(ev.clientX-start.x,ev.clientY-start.y)<6)return;begin();}
+    ev.preventDefault();ghost.style.transform=`translate(${last.x}px,${last.y}px)`;ghost.classList.toggle('hint-right',last.x<300);if(!frame)frame=requestAnimationFrame(preview);};
+  const finish=ev=>{
+    document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',finish);document.removeEventListener('pointercancel',finish);document.removeEventListener('keydown',esc_);
+    cancelAnimationFrame(raf);cancelAnimationFrame(frame);clearTimeout(flipAt?.t);
+    if(!moved)return;
+    if(ev.type==='pointerup'){last.x=ev.clientX;last.y=ev.clientY;preview();}
+    clearMarks();ghost?.remove();document.body.classList.remove('knot-dragging');
+    ui.justDragged=true;setTimeout(()=>{ui.justDragged=false;},400);
+    if(ev.type!=='pointerup')return;
+    if(target&&slideDaysTo(state,id,target,anchor))applyDrop({kind:'slide',id,...(anchor?{anchor}:{})},target);
+    else if(!target)toast('Drop the knot on a slot to move the whole batch.');
+  };
+  const esc_=ev=>{if(ev.key==='Escape'){ev.preventDefault();finish({type:'cancel'});}};
+  document.addEventListener('pointermove',move,{passive:false});document.addEventListener('pointerup',finish);document.addEventListener('pointercancel',finish);document.addEventListener('keydown',esc_);
+}
+document.addEventListener('pointerdown',e=>{const knot=e.target.closest?.('.knot');if(!knot||e.button>0)return;if(e.pointerType==='mouse')e.preventDefault();knotDragStart(e,knot);});
 const toastEl=$('#toast');if(toastEl&&toastEl.showPopover){toastEl.setAttribute('popover','manual');try{toastEl.showPopover();}catch{toastEl.removeAttribute('popover');}}
 document.documentElement.classList.add('first-paint');setTimeout(()=>document.documentElement.classList.remove('first-paint'),1000);
 injectMascots();injectIngredientRats();render();watchRats();if(loadError)toast(loadError,'error');

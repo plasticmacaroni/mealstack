@@ -15,7 +15,9 @@ export const preparationDate = batch => batch.prepDate || (batch.prepAhead?addDa
 export const typeOf = id => id.split('|')[1];
 export const rank = id => Date.parse(dayOf(id)+'T12:00:00Z')/86400000*10 + TYPES.indexOf(typeOf(id));
 export const activeTypes = count => TYPES.filter(t=>count===2 || !t.endsWith('-2'));
-export const money = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n);
+// One formatter, made once (building an Intl formatter per call was a large share of each render).
+const USD=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
+export const money = n => USD.format(n);
 export const price = (id,prices={}) => prices[canonicalIngredientId(id)] ?? INGREDIENTS[canonicalIngredientId(id)].packCost;
 export const ingredientCost = (item,scale=1,prices={},packageSizes={}) => item.qty*scale/packageSize(item.id,packageSizes)*price(item.id,prices);
 export const batchCost = (recipe,scale=1,prices={},packageSizes={}) => recipe.ingredients.reduce((n,i)=>n+ingredientCost(i,scale,prices,packageSizes),0);
@@ -40,44 +42,51 @@ export function demoState(today=localDate()) {
   return s;
 }
 // Where meals are. Every portion card on the calendar is an explicit placement:
-// state.placements maps a slot to the batch eaten there, and state.auto lists, per batch,
-// the slots adding a recipe or Plan my week gave its portions. A card in a slot not on
-// that list was moved by her (the pin), and moving it back clears the pin again.
-// Only adding a batch and planning fill slots, and only empty ones. After that a meal
-// moves when she moves it; nothing else on the calendar shifts on its own.
+// state.placements maps a slot to the batch eaten there. Only adding a batch and planning
+// fill slots, and only empty ones. After that a meal moves when she moves it; nothing else
+// on the calendar shifts on its own. There is no hidden "home" or pin: a swap is just a swap.
+// Lock in: a batch is locked unless b.autoPlanned is set. Plan my week's suggestions start unlocked
+// (autoPlanned: it may replace them); anything she adds, and any batch she edits in batch details,
+// is locked. Only the Lock in / Unlock button (and an edit) changes it: moves never do. A lock only
+// stops Plan my week / Re-plan open meals from replacing the batch; her own moves are never blocked.
 const LEAD=type=>type==='breakfast'||type==='lunch'?1:0; // packed meals are made the evening before
 // A dinner can be cooked the evening before too (batch.nightBefore); that choice follows the batch.
 const leadOf=(b,type)=>b.nightBefore?1:LEAD(type);
 const daysBetween=(a,b)=>Math.round((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:00Z'))/86400000);
-const weekday=date=>new Date(date+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});
+const WEEKDAY=new Intl.DateTimeFormat('en-US',{weekday:'short',timeZone:'UTC'}),MONTH_DAY=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
+const weekday=date=>WEEKDAY.format(new Date(date+'T12:00:00Z'));
 const titleOf=b=>recipeById[b.recipeId].title;
 const isDate=d=>typeof d==='string' && /^20\d{2}-\d{2}-\d{2}$/.test(d) && Number.isFinite(Date.parse(d+'T12:00:00Z')) && new Date(d+'T12:00:00Z').toISOString().slice(0,10)===d;
 const isSlot=id=>typeof id==='string' && id.split('|').length===2 && isDate(dayOf(id)) && TYPES.includes(typeOf(id));
 const byRank=(a,b)=>rank(a)-rank(b);
 const mealsOf=(placements,batchId)=>Object.keys(placements).filter(id=>placements[id]===batchId).sort(byRank);
-const autoSlots=(state,batchId)=>state.auto[batchId]||[];
 // How messages name a day or a slot: "Wed" / "Wed lunch" inside the week on screen, with
 // the date when it is outside that week ("Thu Oct 1 lunch"), so a name is never ambiguous.
-export const dayName=(date,week)=>week&&(date<week||date>addDays(week,6))?`${weekday(date)} ${new Date(date+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'})}`:weekday(date);
+export const dayName=(date,week)=>week&&(date<week||date>addDays(week,6))?`${weekday(date)} ${MONTH_DAY.format(new Date(date+'T12:00:00Z'))}`:weekday(date);
 export const slotName=(id,week)=>`${dayName(dayOf(id),week)} ${SLOT_LABELS[typeOf(id)].toLowerCase()}`;
 export const batchWindow=b=>({cookDay:preparationDate(b),enjoyBy:b.useBy});
-// Food counts as cooked once its cook day is over; on the cook day itself it can still move.
+// Food counts as cooked once its cook day is over. That is only information now: cooked food
+// moves like any other (the calendar is her record too).
 export const isCooked=(b,now=new Date())=>preparationDate(b)<localDate(now);
-function suits(state,b,id) {
-  const kind=recipeById[b.recipeId].kind,type=typeOf(id);
-  if(!activeTypes(state.snackCount).includes(type))return false;
-  return kind==='snack'?type.startsWith('snack'):kind==='breakfast'?type==='breakfast':type==='lunch'||type==='dinner';
-}
-// Food is at its best until its enjoy-by date and still fine, a little softer, until three days
-// after it was cooked (or its enjoy-by, if she set that later). After that it is too old.
-export const SOFT_DAYS=3;
-export const keepsUntil=b=>{const soft=addDays(preparationDate(b),SOFT_DAYS);return b.useBy>soft?b.useBy:soft;};
+// The kind of food a slot is meant for. Any food may go in any slot (a small note says
+// "dinner at breakfast"); Plan my week, adding recipes and Straighten only use matching slots.
+export const fitsType=(b,id)=>{const kind=recipeById[b.recipeId].kind,type=typeOf(id);return kind==='snack'?type.startsWith('snack'):kind==='breakfast'?type==='breakfast':type==='lunch'||type==='dinner';};
+function suits(state,b,id) {return activeTypes(state.snackCount).includes(typeOf(id))&&fitsType(b,id);}
+// Food is at its best until its enjoy-by date; after that it is "mushy" but fine until four days
+// after cooking (USDA: cooked leftovers keep 3–4 days in the fridge). From day 5 it is past
+// fridge-safe. Both are shown on the card and the string, never enforced.
+export const SAFE_DAYS=4;
+// Planning (Plan my week, prep days, adding a recipe) reaches at most three days past a prep day.
+export const PREP_REACH=3;
+export const keepsUntil=b=>addDays(preparationDate(b),SAFE_DAYS);
+export const daysAfterCooking=(b,id)=>daysBetween(preparationDate(b),dayOf(id));
 export function freshness(b,id) {
   const d=dayOf(id);
-  return d<preparationDate(b)?'early':d<=b.useBy?'fresh':d<=keepsUntil(b)?'softer':'too-long';
+  return d<preparationDate(b)?'early':d>keepsUntil(b)?'unsafe':d<=b.useBy?'fresh':'mushy';
 }
 const inWindow=(b,id)=>dayOf(id)>=preparationDate(b)&&dayOf(id)<=keepsUntil(b);
 const inFresh=(b,id)=>dayOf(id)>=preparationDate(b)&&dayOf(id)<=b.useBy;
+const planReach=b=>{const r=addDays(preparationDate(b),PREP_REACH);return b.useBy>r?b.useBy:r;};
 const skipsOf=state=>state.skipped||{};
 const taken=(state,id)=>!!state.placements[id]||Object.hasOwn(skipsOf(state),id);
 
@@ -105,7 +114,7 @@ function legacyAllocation(state) {
     const b=byId[bid];
     if(b&&rank(id)>=rank(b.startSlot)&&dayOf(id)<=b.useBy&&types.includes(typeOf(id))&&!skipped(b,id)&&reserved[bid]<b.portions) {validPins[id]=bid;reserved[bid]++;}
   }
-  const placements={},auto={};
+  const placements={};
   for(const id of slots) {
     const date=dayOf(id),pinned=validPins[id];
     if(pinned) reserved[pinned]--;
@@ -121,23 +130,21 @@ function legacyAllocation(state) {
     // Keep only what the rules below allow, so a migrated plan loads like any other.
     if(!suits(state,chosen,id)||!inFresh(chosen,id)) continue;
     remaining[chosen.id]--;placements[id]=chosen.id;
-    // Her own pins were the only moves; planner reservations were automatic.
-    if(chosen.id!==pinned||chosen.autoPlanned) (auto[chosen.id]??=[]).push(id);
   }
-  return {placements,auto};
+  // Pins are gone: the placements are kept exactly, nothing remembers who put them there.
+  return {placements};
 }
 function allocated(state) {
   if(state.placements) return state;
   const next=structuredClone(state);
   Object.assign(next,legacyAllocation(state));
-  delete next.pins;delete next.skips;
-  for(const b of next.batches) delete b.priority;
+  delete next.pins;delete next.skips;delete next.auto;
+  for(const b of next.batches) {delete b.priority;delete b.home;}
   return next;
 }
 
 // The read API: one cell per slot of the shown week plus every placed portion (in any
-// week), in calendar order. remaining = portions not on the calendar.
-// manual = moved by her (shown as a pin); portions placed automatically are not.
+// week), in calendar order. remaining = portions not on the calendar (extras in the fridge).
 export function schedule(state) {
   state=allocated(state);
   const remaining=Object.fromEntries(state.batches.map(b=>[b.id,b.portions]));
@@ -145,75 +152,53 @@ export function schedule(state) {
   const cells={};
   for(const id of [...new Set([...week,...Object.keys(state.placements),...Object.keys(skipsOf(state))])].sort((a,b)=>rank(a)-rank(b))) {
     const bid=state.placements[id]??null,skip=skipsOf(state)[id];
-    cells[id]={id,chosen:bid,manual:!!bid&&!autoSlots(state,bid).includes(id),...(skip?{skip}:{})};
+    cells[id]={id,chosen:bid,...(skip?{skip}:{})};
     if(bid) remaining[bid]--;
   }
   return {cells,remaining};
 }
 
-// After a move, a batch that isn't cooked yet is cooked for whichever of its meals is now
-// first (the evening before a breakfast or lunch, or a dinner she cooks the night before) and
-// keeps the length of its window; a separate prep date keeps its distance from the first meal.
-// Cooked food keeps its dates. Every meal of the batch has to be ready and not too old
-// (keepsUntil); a meal after its enjoy-by is allowed and reported as "softer".
-// A batch whose cook day doesn't follow that rule (an older same-day lunch, or a batch
-// whose chosen slot was taken) remembers its dates in b.home the first time a move
-// changes them; when its first meal is back on home.first, those exact dates return, so
-// moving a meal away and back always restores the batch as it was.
-// swap = {dragged, from}: this batch is the swap partner, so the message starts with the meal she dragged.
-const HOME_DEPTH=4;
-const nestedHome=(h,depth=1)=>{if(!h.home)return h;if(depth>=HOME_DEPTH){const {home:_,...rest}=h;return rest;}return {...h,home:nestedHome(h.home,depth+1)};};
-function settleWindow(before,next,batchId,to,now,swap=null,placing=false) {
-  const old=before.batches.find(b=>b.id===batchId),b=next.batches.find(b=>b.id===batchId),week=next.week;
-  const oldFirst=mealsOf(before.placements,batchId)[0],first=mealsOf(next.placements,batchId)[0],cooked=isCooked(old,now);
-  // An extra from the fridge placed on or after the batch's first slot while its dates still fit
-  // (a skipped meal put back) takes nothing away from the batch: it keeps the dates it was cooked for.
-  const kept=placing&&first===to&&rank(to)>=rank(old.startSlot)&&inWindow(old,to);
-  let changed=false;
-  if(!cooked&&!kept&&first&&first!==oldFirst) {
-    if(old.home?.first===first) {
-      const {first:_,...dates}=old.home;
-      for(const k of ['startSlot','useBy','prepAhead','prepDate','home']) delete b[k];
-      Object.assign(b,dates);
-    } else {
-      const length=daysBetween(preparationDate(old),old.useBy);
-      const cook=addDays(dayOf(first),-(old.prepDate?daysBetween(old.prepDate,dayOf(old.startSlot)):leadOf(old,typeOf(first))));
-      const title=titleOf(b),lead=swap?`${swap.dragged} can’t swap with ${title}. `:'';
-      if(cook<localDate(now)) throw Error(`${lead}Too late to cook ${title} for ${slotName(first,week)}.`);
-      const gap=oldFirst&&daysBetween(preparationDate(old),dayOf(oldFirst));
-      // Dates that don't follow the first meal are remembered (an earlier memory rides along inside,
-      // so moving back restores it too).
-      if(oldFirst&&(old.prepDate?old.startSlot!==oldFirst:gap!==leadOf(old,typeOf(oldFirst))||old.startSlot!==oldFirst))
-        b.home=nestedHome({first:oldFirst,startSlot:old.startSlot,useBy:old.useBy,...(old.prepAhead?{prepAhead:true}:{}),...(old.prepDate?{prepDate:old.prepDate}:{}),...(old.home?{home:old.home}:{})});
-      b.startSlot=first;b.useBy=addDays(cook,length);
-      if(old.prepDate) b.prepDate=cook;
-      else if(leadOf(old,typeOf(first))) b.prepAhead=true;
-      else delete b.prepAhead;
-    }
-    changed=preparationDate(b)!==preparationDate(old)||b.useBy!==old.useBy;
+// The cook day follows the batch's earliest meal. When a move changes which meal is first:
+// - a batch whose dates follow its first meal (the usual case: cooked for it, the evening before
+//   a packed breakfast or lunch or a night-before dinner) is cooked for the new first meal;
+// - any other batch (a separate prep date, an older same-day lunch, or dates set by hand or kept
+//   when its first meal was skipped) slides all its dates by the days its first meal moved.
+// Either way the window length is kept, so moving a meal away and back restores the batch
+// exactly, and nothing is remembered anywhere. An extra from the fridge put on or after the
+// batch's cook day keeps the batch's dates while that day is fridge-safe, once the food is cooked,
+// and while other meals of the batch are on the calendar (later is shown as past fridge-safe:
+// cooked food never claims a new cook day, and a skipped meal dropped back is exactly where it
+// was). Only an uncooked batch with nothing else on the calendar is cooked for the extra instead.
+// Nothing is refused: meals that end up after enjoy-by are "mushy", after day 4 "past fridge-safe".
+const cookFor=(b,id)=>addDays(dayOf(id),-leadOf(b,typeOf(id)));
+const followsFirst=(b,first)=>b.prepDate?b.startSlot===first:b.startSlot===first&&!!b.prepAhead===!!leadOf(b,typeOf(first));
+function settleWindow(before,next,batchId,to,placing=false,now=new Date()) {
+  const old=before.batches.find(b=>b.id===batchId),b=next.batches.find(b=>b.id===batchId);
+  const oldFirst=mealsOf(before.placements,batchId)[0],first=mealsOf(next.placements,batchId)[0];
+  if(!first||first===oldFirst) return;
+  if(placing&&first===to&&dayOf(to)>=preparationDate(old)&&(inWindow(old,to)||isCooked(old,now)||oldFirst)) return;
+  let days;
+  if(!oldFirst||followsFirst(old,oldFirst)) {
+    days=old.prepDate?daysBetween(dayOf(old.startSlot),dayOf(first)):daysBetween(preparationDate(old),cookFor(old,first));
+    b.startSlot=first;
+    if(!old.prepDate) {if(leadOf(old,typeOf(first))) b.prepAhead=true; else delete b.prepAhead;}
+  } else {
+    // Slide by the days between the old and new first meal, so a meal can never land before cooking.
+    days=daysBetween(dayOf(oldFirst),dayOf(first));
+    b.startSlot=slot(addDays(dayOf(old.startSlot),days),typeOf(old.startSlot));
   }
-  // A refusal after a date change describes the move ("Moved there, it would cook Tue"),
-  // never as if it were the window the cards show now.
-  const {cookDay}=batchWindow(b),keeps=keepsUntil(b),title=titleOf(b),day=d=>dayName(d,week);
-  const there=swap?`Moved to ${slotName(swap.from,week)}`:'Moved there';
-  const would=`${there}, it would cook ${day(cookDay)} and keep until ${day(keeps)}.`;
-  const dates=`${cooked?'Cooked':'Cooks'} ${day(cookDay)} · keeps until ${day(keeps)}.`;
-  const lead=swap?`${swap.dragged} can’t swap with ${title}. `:'';
-  for(const id of mealsOf(next.placements,batchId)) {
-    const late=dayOf(id)>keeps,early=dayOf(id)<cookDay;
-    if(!late&&!early) continue;
-    const says=`${title} ${late?'won’t keep until':'isn’t ready by'} ${slotName(id,week)}.`;
-    if(!changed) throw Error(`${lead}${says} ${dates}`);
-    if(id===to) throw Error(`${lead}${says} ${would}`);
-    throw Error(`${lead}${title}’s ${slotName(id,week)} meal ${late?'wouldn’t keep':'wouldn’t be ready'}. ${would}`);
-  }
+  b.useBy=addDays(old.useBy,days);
+  if(old.prepDate) b.prepDate=addDays(old.prepDate,days);
 }
-// Meals of these batches that are "softer" now and weren't before this change (for the toast and card tag).
-function newlySofter(before,next,ids) {
+// Meals of these batches that are mushy or past fridge-safe now and weren't before (toasts, card tags).
+function newlyLate(before,next,ids) {
   const out=[];
-  for(const bid of ids) {
+  for(const bid of new Set(ids)) {
     const b=next.batches.find(x=>x.id===bid),old=before.batches.find(x=>x.id===bid);if(!b)continue;
-    for(const id of mealsOf(next.placements,bid)) if(freshness(b,id)==='softer'&&!(before.placements[id]===bid&&freshness(old,id)==='softer')) out.push({batchId:bid,slot:id});
+    for(const id of mealsOf(next.placements,bid)) {
+      const now=freshness(b,id);
+      if((now==='mushy'||now==='unsafe')&&!(old&&before.placements[id]===bid&&freshness(old,id)===now)) out.push({batchId:bid,slot:id,state:now,day:daysAfterCooking(b,id)});
+    }
   }
   return out;
 }
@@ -221,29 +206,23 @@ function newlySofter(before,next,ids) {
 // Drag a card, one meal moves. from=null places one of the batch's unplaced portions (an
 // extra in the fridge). Dropping onto another meal swaps the two; an extra dropped onto a meal
 // takes its slot and that meal waits in the fridge instead (bumped). A skip in the way swaps
-// with the meal (or gives way to an extra). A refusal throws a short sentence for her and
-// changes nothing; a drop that changes nothing returns changed:false.
+// with the meal (or gives way to an extra). Past slots, any meal type and any freshness are
+// allowed; the only limit is one thing per slot. A drop that changes nothing returns changed:false.
 export function moveMeal(state,batchId,from,to,{now=new Date()}={}) {
   state=allocated(state);
   const b=state.batches.find(b=>b.id===batchId);
   if(!b) throw Error('That meal is no longer planned.');
   if(!isSlot(to)) throw Error('Choose a meal slot.');
-  const placed=state.placements,title=titleOf(b),today=localDate(now),skips=skipsOf(state);
+  if(!activeTypes(state.snackCount).includes(typeOf(to))) throw Error('Turn on that snack slot first (Show snacks).');
+  const placed=state.placements,title=titleOf(b),skips=skipsOf(state);
   if(from!==null&&placed[from]!==batchId) throw Error('That meal has moved. Try again.');
   if(from===null&&mealsOf(placed,batchId).length>=b.portions) throw Error(`Every portion of ${title} is already on the calendar.`);
   if(to===from||placed[to]===batchId) return {state,changed:false};
-  if(!suits(state,b,to)) throw Error(`${title} can’t go in ${slotName(to,state.week)}.`);
-  if(dayOf(to)<today) throw Error(`${slotName(to,state.week)} is already over.`);
   const partnerId=placed[to],skip=skips[to],next=structuredClone(state);
   let bumped=null,skipGone=null;
   if(partnerId) {
     if(from===null) bumped={batchId:partnerId,slot:to};
-    else {
-      const partner=titleOf(state.batches.find(x=>x.id===partnerId));
-      if(!suits(state,state.batches.find(x=>x.id===partnerId),from)) throw Error(`${title} can’t swap with ${partner}. ${partner} can’t go in ${slotName(from,state.week)}.`);
-      if(dayOf(from)<today) throw Error(`${title} can’t swap with ${partner}. ${partner} can’t move to ${slotName(from,state.week)}. That day is over.`);
-      next.placements[from]=partnerId;
-    }
+    else next.placements[from]=partnerId;
   } else {
     if(from!==null) delete next.placements[from];
     if(skip) {
@@ -252,10 +231,10 @@ export function moveMeal(state,batchId,from,to,{now=new Date()}={}) {
     }
   }
   next.placements[to]=batchId;
-  settleWindow(state,next,batchId,to,now,null,from===null);
-  if(partnerId&&from!==null) settleWindow(state,next,partnerId,from,now,{dragged:title,from});
+  settleWindow(state,next,batchId,to,from===null,now);
+  if(partnerId&&from!==null) settleWindow(state,next,partnerId,from);
   const swapped=partnerId&&from!==null?{swapped:{batchId:partnerId,slot:from}}:{};
-  return {state:next,changed:true,...swapped,...(bumped?{bumped}:{}),...(skipGone?{skipGone}:{}),softer:newlySofter(state,next,[batchId,...(swapped.swapped?[partnerId]:[])])};
+  return {state:next,changed:true,...swapped,...(bumped?{bumped}:{}),...(skipGone?{skipGone}:{}),late:newlyLate(state,next,[batchId,...(swapped.swapped?[partnerId]:[])])};
 }
 
 // ------------------------------------------------ Skips ------------------------------------------------
@@ -269,7 +248,6 @@ export function skipSlot(state,id,{now=new Date()}={}) {
   if(!activeTypes(state.snackCount).includes(typeOf(id))) throw Error('Enable that snack slot first.');
   if(Object.hasOwn(skipsOf(state),id)) return {state,changed:false};
   const bid=state.placements[id];
-  if(!bid&&dayOf(id)<localDate(now)) throw Error(`${slotName(id,state.week)} is already over.`);
   const next=structuredClone(state);next.skipped={...skipsOf(next),[id]:{}};
   if(bid) delete next.placements[id];
   return {state:next,changed:true,...(bid?{extra:bid}:{})};
@@ -281,10 +259,9 @@ export function moveSkip(state,from,to,{now=new Date()}={}) {
   if(!data) throw Error('That skip has moved. Try again.');
   if(!isSlot(to)) throw Error('Choose a meal slot.');
   if(to===from) return {state,changed:false};
-  if(!activeTypes(state.snackCount).includes(typeOf(to))) throw Error('Enable that snack slot first.');
-  if(dayOf(to)<localDate(now)) throw Error(`${slotName(to,state.week)} is already over.`);
+  if(!activeTypes(state.snackCount).includes(typeOf(to))) throw Error('Turn on that snack slot first (Show snacks).');
   const bid=state.placements[to];
-  if(bid) {const r=moveMeal(state,bid,to,from,{now});return {state:r.state,changed:true,swapped:{batchId:bid,slot:from},softer:r.softer};}
+  if(bid) {const r=moveMeal(state,bid,to,from,{now});return {state:r.state,changed:true,swapped:{batchId:bid,slot:from},late:r.late};}
   const next=structuredClone(state),other=skips[to];
   if(other&&JSON.stringify(other)===JSON.stringify(data)) return {state,changed:false};
   next.skipped[to]=data;
@@ -346,7 +323,9 @@ export function cookSmaller(state,batchId,{now=new Date()}={}) {
   x.scale=Math.max(MIN_SCALE,Math.round(x.scale*(x.portions-1)/x.portions*10000)/10000);x.portions--;
   return next;
 }
-// "Put back": one extra goes on the earliest free suitable slot it keeps until (fresh ones first).
+// "Put back": one extra goes on the earliest free suitable slot while it is still fridge-safe
+// (fresh ones first). With none free, the refusal names the way out: Choose a slot (a meal
+// there waits in the fridge instead) or Toss.
 export function placeExtra(state,batchId,{now=new Date()}={}) {
   state=allocated(state);
   const b=state.batches.find(b=>b.id===batchId);
@@ -358,59 +337,106 @@ export function placeExtra(state,batchId,{now=new Date()}={}) {
     if(rank(id)>=rank(from)&&rank(id)>=rank(b.startSlot)&&!taken(state,id)&&suits(state,b,id)&&inWindow(b,id)) open.push(id);
   }
   const spot=open.find(id=>freshness(b,id)==='fresh')||open[0];
-  if(!spot) throw Error(`No free spot for ${titleOf(b)} before it’s too old. Choose a slot with a meal for it (that meal waits in the fridge instead), or toss it.`);
+  if(!spot) throw Error(`No free spot for ${titleOf(b)} while it’s fridge-safe. Tap “Choose a slot” to put it anywhere (a meal there waits in the fridge instead), or toss it.`);
   return {...moveMeal(state,batchId,null,spot,{now}),slot:spot};
 }
 
-// The pin's × puts a meal she moved back where it was placed automatically, if that
-// spot is still free. It never pushes another meal out.
-export function putBack(state,batchId,from,{now=new Date()}={}) {
-  state=allocated(state);
-  if(state.placements[from]!==batchId) throw Error('That meal has moved. Try again.');
-  if(autoSlots(state,batchId).includes(from)) return {state,changed:false};
-  const spot=originalSpot(state,batchId);
-  if(!spot) throw Error('You placed this meal yourself, so it has no other spot to go back to.');
-  if(taken(state,spot)) throw Error(`Its original spot, ${slotName(spot,state.week)}, is taken now.`);
-  return moveMeal(state,batchId,from,spot,{now});
-}
-// Where the pin's × would put a moved meal of this batch: a free original slot if
-// there is one, otherwise the first original slot (taken now), or null.
-export function originalSpot(state,batchId) {
-  state=allocated(state);
-  const spots=autoSlots(state,batchId).filter(id=>state.placements[id]!==batchId);
-  return spots.find(id=>!taken(state,id))??spots[0]??null;
-}
-
-// "Move whole batch": every meal, the cook day and enjoy-by shift by the same number of
-// days. No swaps: another meal in the way refuses the move, and so does cooked food.
-// Its automatic spots move along (no pins), and like an edit in batch details the batch
-// is hers from then on: Plan my week no longer replaces it.
+// Whole-batch move ("Cook it another day", dragging the knot, Move whole batch): every meal,
+// the cook day and enjoy-by shift by the same number of days, in the past or into another week,
+// cooked or not. A meal of another batch in the way waits in the fridge as an extra (bumped;
+// that batch keeps its dates), and a skip in the way gives way. A move never changes the lock.
 export function slideBatch(state,batchId,days,{now=new Date()}={}) {
   state=allocated(state);
   const b=state.batches.find(b=>b.id===batchId);
   if(!b) throw Error('That meal is no longer planned.');
-  if(!Number.isInteger(days)) throw Error('Choose a day.');
+  if(!Number.isInteger(days)||Math.abs(days)>366) throw Error('Choose a day.');
   if(!days) return {state,changed:false};
-  const title=titleOf(b),today=localDate(now),shift=id=>slot(addDays(dayOf(id),days),typeOf(id));
-  if(isCooked(b,now)) throw Error(`${title} is already cooked, so its cook day can’t move.`);
-  const next=structuredClone(state),moved=next.batches.find(x=>x.id===batchId);
+  const shift=id=>slot(addDays(dayOf(id),days),typeOf(id));
+  const next=structuredClone(state),moved=next.batches.find(x=>x.id===batchId),bumped=[],skipsGone=[];
   const meals=mealsOf(state.placements,batchId);
   for(const id of meals) delete next.placements[id];
   for(const id of meals) {
     const to=shift(id),other=next.placements[to];
-    if(dayOf(to)<today) throw Error(`${slotName(to,state.week)} is already over.`);
-    if(other) throw Error(`${titleOf(state.batches.find(x=>x.id===other))} is on ${slotName(to,state.week)}.`);
-    if(Object.hasOwn(skipsOf(next),to)) throw Error(`${slotName(to,state.week)} is skipped. Remove the skip first.`);
+    if(other) bumped.push({batchId:other,slot:to});
+    if(Object.hasOwn(skipsOf(next),to)) {skipsGone.push({slot:to,...next.skipped[to]});delete next.skipped[to];}
     next.placements[to]=batchId;
   }
-  if(next.auto[batchId]) next.auto[batchId]=next.auto[batchId].map(shift);
-  delete moved.autoPlanned;
-  delete moved.home;
   moved.startSlot=shift(moved.startSlot);moved.useBy=addDays(moved.useBy,days);
   if(moved.prepDate) moved.prepDate=addDays(moved.prepDate,days);
-  if(preparationDate(moved)<today) throw Error(`Too late to cook ${title} then.`);
+  return {state:next,changed:true,bumped,skipsGone,late:newlyLate(state,next,[batchId])};
+}
+// The whole-batch move that puts the meal the knot sits on (`anchor`, by default the batch's first
+// meal) on `target`'s day.
+export function slideDaysTo(state,batchId,target,anchor=null) {
+  state=allocated(state);
+  const b=state.batches.find(b=>b.id===batchId);if(!b)return 0;
+  const first=anchor&&state.placements[anchor]===batchId?anchor:mealsOf(state.placements,batchId)[0]||b.startSlot;
+  return daysBetween(dayOf(first),dayOf(target));
+}
+// Lock in / Unlock (see the top of this file). One Undo; nothing on the calendar moves.
+export const isLocked=b=>!b.autoPlanned;
+export function setLocked(state,batchId,locked) {
+  state=allocated(state);
+  const b=state.batches.find(b=>b.id===batchId);
+  if(!b) throw Error('That meal is no longer planned.');
+  if(isLocked(b)===!!locked) return {state,changed:false};
+  const next=structuredClone(state),x=next.batches.find(b=>b.id===batchId);
+  if(locked) delete x.autoPlanned; else x.autoPlanned=true;
   return {state:next,changed:true};
 }
+
+// Straighten string: the batch's first meal stays; its other meals on the calendar go, in
+// order, to the earliest free slots of their kind after it while the food is fridge-safe.
+// Never moves another batch or a skip; what doesn't fit waits in the fridge as an extra.
+// Running it twice changes nothing the second time.
+export function straightenBatch(state,batchId) {
+  state=allocated(state);
+  const b=state.batches.find(b=>b.id===batchId);
+  if(!b) throw Error('That meal is no longer planned.');
+  const meals=mealsOf(state.placements,batchId),first=meals[0];
+  if(!first) return {state,changed:false,placed:[],fridged:0,from:[]};
+  const rest=meals.slice(1),next=structuredClone(state);
+  for(const id of rest) delete next.placements[id];
+  const open=[];
+  for(let d=dayOf(first);d<=keepsUntil(b)&&open.length<rest.length;d=addDays(d,1)) for(const t of activeTypes(state.snackCount)) {
+    const id=slot(d,t);
+    if(rank(id)>rank(first)&&!taken(next,id)&&suits(next,b,id)&&inWindow(b,id)&&open.length<rest.length) open.push(id);
+  }
+  for(const id of open) next.placements[id]=batchId;
+  const changed=rest.length!==open.length||rest.some((id,i)=>id!==open[i]);
+  return changed?{state:next,changed,placed:open,fridged:rest.length-open.length,from:rest}:{state,changed:false,placed:rest,fridged:0,from:rest};
+}
+// Batches with a meal in the week on screen (or cooked in it), first meal first.
+export function weekBatches(state) {
+  state=allocated(state);
+  const end=addDays(state.week,6),first=id=>mealsOf(state.placements,id)[0];
+  return state.batches.filter(b=>mealsOf(state.placements,b.id).some(id=>dayOf(id)>=state.week&&dayOf(id)<=end))
+    .sort((a,b)=>rank(first(a.id))-rank(first(b.id))||a.id.localeCompare(b.id));
+}
+// Tidy week: straighten every string with a meal in the week on screen. Each batch only takes
+// free slots, so no batch pushes another; it repeats until nothing changes (so it is idempotent).
+export function tidyWeek(state) {
+  state=allocated(state);
+  let next=state;const touched=new Set();let fridged=0;
+  for(let pass=0;pass<50;pass++) {
+    let changed=false;
+    for(const b of weekBatches(next)) {const r=straightenBatch(next,b.id);if(r.changed){next=r.state;changed=true;touched.add(b.id);fridged+=r.fridged;}}
+    if(!changed) break;
+  }
+  return {state:next,changed:next!==state,straightened:[...touched],fridged};
+}
+// "Put the late meal in the fridge": meals past fridge-safe come off the calendar as extras.
+export function fridgeLate(state,batchId) {
+  state=allocated(state);
+  const b=state.batches.find(b=>b.id===batchId);
+  if(!b) throw Error('That meal is no longer planned.');
+  const late=mealsOf(state.placements,batchId).filter(id=>freshness(b,id)==='unsafe');
+  if(!late.length) return {state,changed:false,slots:[]};
+  const next=structuredClone(state);for(const id of late) delete next.placements[id];
+  return {state:next,changed:true,slots:late};
+}
+// Meals of a batch on the calendar, in order (the string's beads).
+export const batchMeals=(state,batchId)=>mealsOf(allocated(state).placements,batchId);
 
 function freeSlots(state,b,from=b.startSlot,until=b.useBy) {
   const open=[];
@@ -426,7 +452,6 @@ function fillFreeSlots(state,b,until=b.useBy,count=b.portions) {
   const missing=Math.min(b.portions,count)-mealsOf(state.placements,b.id).length;
   const open=freeSlots(state,b,b.startSlot,until).slice(0,Math.max(0,missing));
   for(const id of open) state.placements[id]=b.id;
-  if(open.length) state.auto[b.id]=[...new Set([...autoSlots(state,b.id),...open])].sort(byRank);
 }
 // A prep day today still counts until 8pm; after that the earliest prep day is tomorrow.
 export const PREP_CUTOFF_HOUR=20;
@@ -436,7 +461,7 @@ export const prepFloor=now=>now?(now.getHours()<PREP_CUTOFF_HOUR?localDate(now):
 export function prepDayFor(style,target,today=null) {
   if(style?.mode!=='prep') return null;
   const d=dayOf(target),latest=LEAD(typeOf(target))?addDays(d,-1):d;
-  for(let p=latest;p>=addDays(d,-SOFT_DAYS);p=addDays(p,-1)) {
+  for(let p=latest;p>=addDays(d,-PREP_REACH);p=addDays(p,-1)) {
     if(today&&p<today) break;
     if(style.days.includes(new Date(p+'T12:00:00Z').getUTCDay())) return p;
   }
@@ -453,53 +478,41 @@ export function styledBatch(recipeId,start,style=DEFAULT_COOK_STYLE,today=null,i
   return b;
 }
 
-// Adding a recipe: the first portion goes where she dropped it. A meal already there waits in
-// the fridge as an extra and a skip there gives way (the toast says so, with Undo). Dropped on
-// a slot of the wrong kind, it starts at the next free suitable slot. The rest fill the
-// following free slots before its enjoy-by (up to three days after a prep day). It never
-// creates a batch with no meal on the calendar. With now, a slot that is already over is
-// refused like a move (the example week and older code paths build plans without it).
+// Adding a recipe: the first portion goes exactly where she dropped it, on any day and in any
+// slot (a breakfast dropped on a dinner slot shows a small note). A meal already there waits in
+// the fridge as an extra and a skip there gives way (the toast says so, with Undo). The rest fill
+// the following free slots of their kind before its enjoy-by (up to three days after a prep day).
 export function addBatchAt(state,recipeId,target,{now}={}) {
   const recipe=recipeById[recipeId];
   if(!recipe) throw Error('Unknown meal.');
   if(!isSlot(target)) throw Error('Choose a meal slot.');
-  if(now&&dayOf(target)<localDate(now)) throw Error(`${slotName(target,state.week)} is already over.`);
-  if(!activeTypes(state.snackCount).includes(typeOf(target))) throw Error('Enable that snack slot first.');
+  if(!activeTypes(state.snackCount).includes(typeOf(target))) throw Error('Turn on that snack slot first (Show snacks).');
   const next=structuredClone(allocated(state)),id=globalThis.crypto.randomUUID(),style=state.cookStyle||DEFAULT_COOK_STYLE,today=prepFloor(now);
-  const make=start=>styledBatch(recipeId,start,style,today,id),reach=b=>style.mode==='prep'?keepsUntil(b):b.useBy;
-  let batch=make(target);
-  if(suits(next,batch,target)) {
-    delete next.placements[target];
-    if(next.skipped) delete next.skipped[target];
-  } else {
-    const first=freeSlots(next,batch,target,reach(batch))[0];
-    if(!first) {
-      const kind=recipe.kind==='snack'?'snack':recipe.kind==='breakfast'?'breakfast':'lunch or dinner';
-      throw Error(`${recipe.title} needs a ${kind} slot, and none is free before it would be too old. Drop it on a ${kind} slot.`);
-    }
-    batch=make(first);
-  }
-  next.batches.push(batch);next.placements[batch.startSlot]=batch.id;next.auto[batch.id]=[batch.startSlot];
-  fillFreeSlots(next,batch,reach(batch));
+  const batch=styledBatch(recipeId,target,style,today,id),reach=style.mode==='prep'?planReach(batch):batch.useBy;
+  delete next.placements[target];
+  if(next.skipped) delete next.skipped[target];
+  next.batches.push(batch);next.placements[batch.startSlot]=batch.id;
+  fillFreeSlots(next,batch,reach);
   if(recipe.kind==='snack'||typeOf(target).startsWith('snack')) next.showSnacks=true;
   return next;
 }
 
-// Saving the batch form. A new batch fills free slots from its first available slot. An
+// Saving the batch form (an edit locks the batch). A new batch fills free slots from its first available slot. An
 // edited batch keeps its meals: a new available date moves them by the same number of
 // days, meals that no longer fit its dates or portion count wait under Your batches, and
 // portions that are missing take free slots in its window.
 export function saveBatch(state,batch) {
   const next=structuredClone(allocated(state)),old=next.batches.find(b=>b.id===batch.id),b=structuredClone(batch);
-  delete b.home;
+  delete b.home;delete b.autoPlanned;
   if(old) {
     const days=daysBetween(dayOf(old.startSlot),dayOf(b.startSlot)),shift=id=>slot(addDays(dayOf(id),days),typeOf(id));
     const meals=mealsOf(next.placements,b.id);
     for(const id of meals) delete next.placements[id];
-    if(next.auto[b.id]) next.auto[b.id]=next.auto[b.id].map(shift);
     next.batches=next.batches.map(x=>x.id===b.id?b:x);
+    // Her meals stay where they are (moved with a new date), mushy or not, in any kind of slot;
+    // only a meal the new dates put before cooking waits in the fridge.
     // Fewer portions: the extras in the fridge go first, then the latest meals.
-    for(const id of meals.map(shift).filter(id=>inWindow(b,id)&&suits(next,b,id)&&!taken(next,id)).slice(0,b.portions)) next.placements[id]=b.id;
+    for(const id of meals.map(shift).filter(id=>dayOf(id)>=preparationDate(b)&&activeTypes(next.snackCount).includes(typeOf(id))&&!taken(next,id)).slice(0,b.portions)) next.placements[id]=b.id;
     // Extras already in the fridge stay there; only portions added here (or a meal the new
     // dates pushed off a taken slot) look for a free slot.
     fillFreeSlots(next,b,b.useBy,meals.length+Math.max(0,b.portions-old.portions));
@@ -508,12 +521,29 @@ export function saveBatch(state,batch) {
   return next;
 }
 
+// Snack slots per gap (Show snacks → "1 between meals" / "2 between meals"). Going down to one,
+// a meal or a skip still on a second snack slot is named (move it first); a batch that only
+// started on one (its meal since moved or skipped) now starts on the first snack slot of that
+// gap: same day, so the same cook day and enjoy-by.
+export function setSnackCount(state,n) {
+  state=allocated(state);
+  if(![1,2].includes(n)) throw Error('Choose 1 or 2 snack slots.');
+  const next=structuredClone(state);next.snackCount=n;
+  if(n===1) {
+    const second=id=>typeOf(id).endsWith('-2'),skips=skipsOf(state);
+    const held=[...Object.keys(state.placements).filter(second).map(id=>`${titleOf(state.batches.find(b=>b.id===state.placements[id]))} (${slotName(id,state.week)})`),
+      ...Object.keys(skips).filter(second).map(id=>`the skip on ${slotName(id,state.week)}`)];
+    if(held.length) throw Error(`Move ${held.join(', ')} out of the second snack slots first.`);
+    for(const b of next.batches) if(second(b.startSlot)) b.startSlot=slot(dayOf(b.startSlot),typeOf(b.startSlot).replace(/-2$/,'-1'));
+  }
+  return next;
+}
+
 // Removing batches frees their slots.
 export function removeBatches(state,batchIds) {
   const next=structuredClone(allocated(state)),gone=new Set(batchIds);
   next.batches=next.batches.filter(b=>!gone.has(b.id));
   for(const [id,bid] of Object.entries(next.placements)) if(gone.has(bid)) delete next.placements[id];
-  for(const id of gone) delete next.auto[id];
   return next;
 }
 export function purchaseFor(state,id,qty) {
@@ -559,23 +589,17 @@ export function validateState(input) {
   const s=emptyState(input.week);s.snackCount=input.snackCount;s.showSnacks=input.showSnacks;
   const ids=new Set();
   s.batches=input.batches.map(b=>{
-    if(!obj(b)||typeof b.id!=='string'||!/^[\w-]{1,80}$/.test(b.id)||ids.has(b.id)||!Object.hasOwn(recipeById,b.recipeId)||!validSlot(b.startSlot)||!activeTypes(s.snackCount).includes(typeOf(b.startSlot))||!date(b.useBy)||b.useBy>addDays(dayOf(b.startSlot),7)||!Number.isFinite(b.scale)||b.scale<0.25||b.scale>4||!Number.isInteger(b.portions)||b.portions<1||b.portions>30) fail();
+    if(!obj(b)||typeof b.id!=='string'||!/^[\w-]{1,80}$/.test(b.id)||ids.has(b.id)||!Object.hasOwn(recipeById,b.recipeId)||!validSlot(b.startSlot)||!activeTypes(s.snackCount).includes(typeOf(b.startSlot))||!date(b.useBy)||b.useBy>addDays(dayOf(b.startSlot),8)||!Number.isFinite(b.scale)||b.scale<0.25||b.scale>4||!Number.isInteger(b.portions)||b.portions<1||b.portions>30) fail();
     if(b.autoPlanned!==undefined&&typeof b.autoPlanned!=='boolean')fail();
     if(b.prepAhead!==undefined&&typeof b.prepAhead!=='boolean')fail();
     if(b.nightBefore!==undefined&&typeof b.nightBefore!=='boolean')fail();
     if(b.prepDate!==undefined&&(!date(b.prepDate)||b.prepDate>dayOf(b.startSlot)||b.prepDate<addDays(dayOf(b.startSlot),-7)))fail();
-    // Enjoy-by can't be before the food is cooked (it may be before a meal eaten "softer").
+    // Enjoy-by can't be before the food is cooked (it may be before a meal eaten "mushy").
     if(b.useBy<(b.prepDate||(b.prepAhead||b.nightBefore?addDays(dayOf(b.startSlot),-1):dayOf(b.startSlot))))fail();
     if(b.priority!==undefined&&(!Number.isInteger(b.priority)||b.priority<1||b.priority>1000000))fail();
-    // Remembered dates (see settleWindow), possibly with an earlier memory inside.
-    const cleanHome=(home,depth=1)=>{
-      if(!obj(home)||depth>HOME_DEPTH||!validSlot(home.first)||!validSlot(home.startSlot)||!date(home.useBy)||(home.prepDate===undefined&&home.useBy<addDays(dayOf(home.startSlot),-1))||home.useBy>addDays(dayOf(home.startSlot),7)||(home.prepAhead!==undefined&&home.prepAhead!==true)
-        ||(home.prepDate!==undefined&&(!date(home.prepDate)||home.prepDate>dayOf(home.startSlot)||home.prepDate<addDays(dayOf(home.startSlot),-7)||home.useBy<home.prepDate)))fail();
-      return {first:home.first,startSlot:home.startSlot,useBy:home.useBy,...(home.prepAhead&&!home.prepDate?{prepAhead:true}:{}),...(home.prepDate?{prepDate:home.prepDate}:{}),...(home.home!==undefined&&!home.prepDate===!home.home.prepDate?{home:cleanHome(home.home,depth+1)}:{})};
-    };
-    const home=b.home===undefined?undefined:cleanHome(b.home);
+    // Older saves may carry remembered dates (b.home); they are dropped.
     if(b.mealTypes!==undefined&&(!Array.isArray(b.mealTypes)||!b.mealTypes.length||b.mealTypes.length>3||b.mealTypes.some(t=>!['breakfast','lunch','dinner'].includes(t))))fail();
-    ids.add(b.id);return {id:b.id,recipeId:b.recipeId,startSlot:b.startSlot,useBy:b.useBy,scale:b.scale,portions:b.portions,...(b.autoPlanned?{autoPlanned:true}:{}),...((b.prepAhead||b.nightBefore)&&!b.prepDate?{prepAhead:true}:{}),...(b.nightBefore&&!b.prepDate?{nightBefore:true}:{}),...(b.prepDate?{prepDate:b.prepDate}:{}),...(b.priority?{priority:b.priority}:{}),...(b.mealTypes?{mealTypes:[...new Set(b.mealTypes)]}:{}),...(home&&!b.prepDate===!home.prepDate?{home}:{})};
+    ids.add(b.id);return {id:b.id,recipeId:b.recipeId,startSlot:b.startSlot,useBy:b.useBy,scale:b.scale,portions:b.portions,...(b.autoPlanned?{autoPlanned:true}:{}),...((b.prepAhead||b.nightBefore)&&!b.prepDate?{prepAhead:true}:{}),...(b.nightBefore&&!b.prepDate?{nightBefore:true}:{}),...(b.prepDate?{prepDate:b.prepDate}:{}),...(b.priority?{priority:b.priority}:{}),...(b.mealTypes?{mealTypes:[...new Set(b.mealTypes)]}:{})};
   });
   // Skips: a slot with no meal, optional label / cost / note.
   if(input.skipped!==undefined&&!obj(input.skipped))fail();
@@ -619,19 +643,17 @@ export function validateState(input) {
     for(const b of s.batches) if(Object.values(pins).filter(id=>id===b.id).length>b.portions) fail();
     Object.assign(s,allocated({...s,pins,skips}));
   } else if(!legacy) {
-    if(!obj(input.placements)||(input.auto!==undefined&&!obj(input.auto))) fail();
+    if(!obj(input.placements)) fail();
     const byId=Object.fromEntries(s.batches.map(b=>[b.id,b]));
-    s.placements={};s.auto={};
+    s.placements={};
+    // Any food may be in any slot, on any day; one thing per slot. (Older saves' input.auto,
+    // the pin record, is ignored.)
     for(const [id,bid] of Object.entries(input.placements)) {
       const b=byId[bid];
-      if(!validSlot(id)||!b||!suits(s,b,id)||!inWindow(b,id)||Object.hasOwn(s.skipped,id)) fail();
+      if(!validSlot(id)||!b||!activeTypes(s.snackCount).includes(typeOf(id))||Object.hasOwn(s.skipped,id)) fail();
       s.placements[id]=bid;
     }
     for(const b of s.batches) if(mealsOf(s.placements,b.id).length>b.portions) fail();
-    for(const [bid,slots] of Object.entries(input.auto||{})) {
-      if(!ids.has(bid)||!Array.isArray(slots)||slots.length>30||slots.some(id=>!validSlot(id))) fail();
-      if(slots.length) s.auto[bid]=[...new Set(slots)].sort(byRank);
-    }
     for(const b of s.batches) delete b.priority;
   }
   const pantry=Array.isArray(input.haveEnough)?{[input.week]:input.haveEnough}:input.haveEnough;
